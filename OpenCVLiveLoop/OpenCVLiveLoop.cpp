@@ -133,7 +133,7 @@ string getAnimationFrameNumberAsString(int animationFrameNumber)
 cv::Mat getAniImg(int animationFrameNumber) {
 	cv::Mat aniImg;
 	stringstream path;
-	path << "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/Animationen/Kamehameha-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
+	path << "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/OpenCV_Kamehameha/Animationen/Kamehameha-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
 	aniImg = cv::imread(path.str(), CV_LOAD_IMAGE_COLOR);
 
 	if (aniImg.data == NULL) {

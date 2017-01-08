@@ -1,5 +1,11 @@
-﻿  OpenCVLiveLoop.cpp
+﻿  stdafx.cpp
+  StereoLoop.cpp
 c:\opencv2.4\opencv\build\include\opencv2\flann\logger.h(66): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
   c:\program files (x86)\windows kits\10\include\10.0.10240.0\ucrt\stdio.h(205): note: Siehe Deklaration von "fopen"
-  OpenCVLiveLoop.vcxproj -> C:\Users\Nick\Studium\Medien- und Kommunikationsinformatik\6. Semester\(W) Bildverarbeitung - Labor\Aufgabe05\OpenCVLiveLoop_03\Debug\OpenCVLiveLoop.exe
-  OpenCVLiveLoop.vcxproj -> C:\Users\Nick\Studium\Medien- und Kommunikationsinformatik\6. Semester\(W) Bildverarbeitung - Labor\Aufgabe05\OpenCVLiveLoop_03\Debug\OpenCVLiveLoop.pdb (Full PDB)
+  OpenCVLiveLoop.cpp
+c:\opencv2.4\opencv\build\include\opencv2\flann\logger.h(66): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  c:\program files (x86)\windows kits\10\include\10.0.10240.0\ucrt\stdio.h(205): note: Siehe Deklaration von "fopen"
+  MonoLoop.cpp
+  Code wird generiert...
+  OpenCVLiveLoop.vcxproj -> C:\Users\Nick\Studium\Medien- und Kommunikationsinformatik\6. Semester\(W) Bildverarbeitung - Labor\Aufgabe05\OpenCV_Kamehameha\Debug\OpenCVLiveLoop.exe
+  OpenCVLiveLoop.vcxproj -> C:\Users\Nick\Studium\Medien- und Kommunikationsinformatik\6. Semester\(W) Bildverarbeitung - Labor\Aufgabe05\OpenCV_Kamehameha\Debug\OpenCVLiveLoop.pdb (Full PDB)
