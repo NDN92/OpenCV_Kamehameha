@@ -55,26 +55,13 @@ enum Gestures {
 	KAMEHAMEHA
 };
 Gestures gesture = NONE;
-enum movementDirections {
-	LEFT, RIGHT
-};
-movementDirections movementDirection;
-const int MOVEMENT_ACCURACY = 100;
-int movementCounter = 0;
-int minXPosistions[MOVEMENT_ACCURACY];
-int maxXPosistions[MOVEMENT_ACCURACY];
 
 int kamehamehaX = (int)(MY_IMAGE_WIDTH  / 2.0);
 int kamehamehaY = (int)(MY_IMAGE_HEIGHT / 2.0);
 
-void clearMovements() {
-	for (int i = 0; i < MOVEMENT_ACCURACY; i++) {
-		minXPosistions[i] = -1;
-		maxXPosistions[i] = -1;
-	}
-	movementCounter = 0;
-}
 
+
+/*******************Positions-Funktionen************************************************************************/
 void clearPositions() {
 	for (int i = 0; i < POSITION_VARS; i++) {
 		for (int j = 0; j < POSITIONS_ACCURACY; j++) {
@@ -83,6 +70,86 @@ void clearPositions() {
 	}
 }
 
+void manipulatePositions(int index, PositionVars posVar, int value) {
+	if (index > -1) {
+		positions[index][posVar] = value;
+	}
+	else {
+		index = POSITIONS_ACCURACY + index;
+		positions[index][posVar] = value;
+	}
+}
+
+bool isEmptyPositionsEntry(int index) {
+	for (int i = 0; i < POSITION_VARS; i++) {
+		if (positions[index][i] != 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+int getLastPosition(int returnBy, PositionVars posVar) {
+	int start = positionsCount - returnBy;
+	if (start > -1) {
+		if (isEmptyPositionsEntry(start)) return INT16_MIN;
+		return positions[start][posVar];
+	}
+	else {
+		start = POSITIONS_ACCURACY + start;
+		if (isEmptyPositionsEntry(start)) return INT16_MIN;
+		return positions[start][posVar];
+	}
+}
+
+int getPositionAverageDelta(int returnBy, PositionVars posVar, int skip = 0) {
+	int start = positionsCount - skip;
+	if (positionsCount == 0) {
+		int a = 0;
+	}
+	int curr = 0;
+	int prev = 0;
+	int averageDelta = 0;
+	bool jump = false;
+	for (int i = start; i > (start - returnBy); i--) {
+		if (i < 0) {
+			jump = true;
+			break;
+		}
+		if (i == start) {
+			if (isEmptyPositionsEntry(i)) return INT16_MIN;
+			prev = positions[i][posVar];
+			continue;
+		}
+		if (isEmptyPositionsEntry(i)) return INT16_MIN;
+		curr = positions[i][posVar];
+		averageDelta += prev - curr;
+		prev = curr;
+	}
+	if (jump) {
+		for (int i = (POSITIONS_ACCURACY - 1); i > (POSITIONS_ACCURACY + (start - returnBy)); i--) {
+			if (isEmptyPositionsEntry(i)) return INT16_MIN;
+			curr = positions[i][posVar];
+			averageDelta += prev - curr;
+			prev = curr;
+		}
+	}
+	averageDelta = averageDelta / ((float)returnBy - 1);
+
+	return averageDelta;
+}
+/**********************************************************************************************************/
+
+void clearEnteredStates() {
+	for (int i = 0; i < ENTERED_STATES_MAX; i++) {
+		enteredStates[i] = NO_CONDITION;
+	}
+}
+
+
+
+
+/*******************Animations-Funktionen*******************************************************************/
 cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, int originY) {
 	cv::Mat addImg;
 	int offsetX = (int)(120 * resizeFactor);
@@ -163,42 +230,9 @@ cv::Mat getAniImg(int animationFrameNumber) {
 	
 	return aniImg;
 }
-
-Gestures checkMovement() {
-	/*
-	if (minXPosistions[MOVEMENT_ACCURACY] < 0) {
-		return false;
-	}
-	*/
-	int minX_mediumDev = 0;
-	int realMovementLength = 1;
-	for (int i = 1; i < MOVEMENT_ACCURACY; i++) {
-		if (minXPosistions[i] <= 0) {
-			if (i == 1) {
-				return NONE;
-			}
-			else {
-				realMovementLength = i;
-				break;
-			};
-		}
-		minX_mediumDev += minXPosistions[i - 1] - minXPosistions[i];
-	}
-	minX_mediumDev = (int)((double)minX_mediumDev / (double)realMovementLength);
-	if (minX_mediumDev < 0) {
-		movementDirection = RIGHT;
-	}
-	else {
-		movementDirection = LEFT;
-	}
-
-	if (minX_mediumDev > 30) {
-		return KAMEHAMEHA;
-	}
+/**********************************************************************************************************/
 
 
-	return NONE;
-}
 
 bool searchPositions(cv::Mat imgDiff) {
 	float scaleFactor = 0.15625;
@@ -367,168 +401,10 @@ bool searchPositions(cv::Mat imgDiff) {
 		return true;
 	}
 	return false;
-	/*
-	cv::Mat imgCanny;
-	cv::Canny(img, imgCanny, 0, 255, 3);
-	imshow("imgCanny", imgCanny);	
-	
-	cv::findContours(imgCanny, contours, hierarchy, CV_RETR_TREE, CV_CHAIN_APPROX_SIMPLE);
-
-	vector<cv::Moments> mu(contours.size());
-	for (int i = 0; i < contours.size(); i++) {
-		mu[i] = moments(contours[i], false);
-	}
-	vector<cv::Point2f> mc(contours.size());
-	for (int i = 0; i < contours.size(); i++)
-	{
-		mc[i] = cv::Point2f(mu[i].m10 / mu[i].m00, mu[i].m01 / mu[i].m00);
-	}
-
-	cv::RNG rng(12345);
-	cv::Mat imgContours = cv::Mat::zeros(imgCanny.size(), CV_8UC3);
-	for (int i = 0; i< contours.size(); i++)
-	{
-		cv::Scalar color = cv::Scalar(rng.uniform(0, 255), rng.uniform(0, 255), rng.uniform(0, 255));
-		drawContours(imgContours, contours, i, color, 2, 8, hierarchy, 0, cv::Point());
-		circle(imgContours, mc[i], 4, color, -1, 8, 0);
-	}
-	imshow("imgContours", imgContours);
-
-	/*
-	cv::Moments moments = cv::moments(img);
-	double area = cv::contourArea(moments.m00);
-	if (area > 10000) {
-		persX0 = (int)(moments.m10 / area);
-		persY0 = (int)(moments.m01 / area);
-	} else {
-		persX0 = -1;
-		persY0 = -1;
-	}
-	*/
-}
-
-void manipulatePositions(int index, PositionVars posVar, int value) {
-	if (index > -1) {
-		positions[index][posVar] = value;
-	}
-	else {
-		index = POSITIONS_ACCURACY + index;
-		positions[index][posVar] = value;
-	}
-}
-
-void clearEnteredStates() {
-	for (int i = 0; i < ENTERED_STATES_MAX; i++) {
-		enteredStates[i] = NO_CONDITION;
-	}
-}
-
-bool isLastPositionsEmpty() {
-	for (int i = 0; i < POSITION_VARS; i++) {
-		if (positionsAverageDelta[i] != 0) {
-			return false;
-		}
-	}
-	return true;
-}
-
-bool isEmptyPositionsEntry(int index) {
-	for (int i = 0; i < POSITION_VARS; i++) {
-		if (positions[index][i] != 0) {
-			return false;
-		}
-	}
-	return true;
-}
-
-int getLastPosition(int returnBy, PositionVars posVar) {
-	int start = positionsCount - returnBy;
-	if (start > -1) {
-		if (isEmptyPositionsEntry(start)) return INT16_MIN;
-		return positions[start][posVar];
-	}
-	else {
-		start = POSITIONS_ACCURACY + start;
-		if (isEmptyPositionsEntry(start)) return INT16_MIN;
-		return positions[start][posVar];
-	}
-}
-
-int getPositionAverageDelta(int returnBy, PositionVars posVar, int skip = 0) {
-	int start = positionsCount - skip;
-	if (positionsCount == 0) {
-		int a = 0;
-	}	
-	int curr = 0;
-	int prev = 0;	
-	int averageDelta = 0;
-	bool jump = false;
-	for (int i = start; i > (start - returnBy); i--) {
-		if (i < 0) {
-			jump = true;
-			break;
-		}
-		if (i == start) {
-			if (isEmptyPositionsEntry(i)) return INT16_MIN;
-			prev = positions[i][posVar];
-			continue;
-		}
-		if (isEmptyPositionsEntry(i)) return INT16_MIN;
-		curr = positions[i][posVar];
-		averageDelta += prev - curr;
-		prev = curr;
-	}
-	if (jump) {
-		for (int i = (POSITIONS_ACCURACY - 1); i > (POSITIONS_ACCURACY + (start - returnBy)); i--) {
-			if (isEmptyPositionsEntry(i)) return INT16_MIN;
-			curr = positions[i][posVar];
-			averageDelta += prev - curr;
-			prev = curr;
-		}
-	}
-	averageDelta = averageDelta / ((float)returnBy - 1);
-
-	return averageDelta;
 }
 
 
-void createLastPositionsAverageDelta(int returnBy) {
-	for (int i = 0; i < POSITION_VARS; i++) {
-		positionsAverageDelta[i] = 0;
-	}
 
-	int minus5 = positionsCount - returnBy;
-	if (minus5 > -1) {
-		for (int i = 0; i < POSITION_VARS; i++) {
-			for (int j = minus5; j < positionsCount; j++) {
-				if (j + 1 >= positionsCount) break;
-				positionsAverageDelta[i] += positions[j + 1][i] - positions[j][i];
-			}
-			positionsAverageDelta[i] = (int)(positionsAverageDelta[i] / ((float)returnBy - 1));
-		}
-	}
-	else {
-		int end = returnBy + minus5;
-		int start = POSITIONS_ACCURACY + minus5;
-		for (int i = 0; i < POSITION_VARS; i++) {
-			for (int k = start; k < POSITIONS_ACCURACY; k++) {
-				if (k + 1 >= POSITIONS_ACCURACY) {
-					if (end > 0) {
-						positionsAverageDelta[i] += positions[0][i] - positions[k][i];
-					}
-					break;
-				}
-				positionsAverageDelta[i] += positions[k + 1][i] - positions[k][i];
-			}
-			for (int j = 0; j < end + 1; j++) {
-				if (j + 1 >= end) break;
-				positionsAverageDelta[i] += positions[j + 1][i] - positions[j][i];
-			}
-
-			positionsAverageDelta[i] = (int)(positionsAverageDelta[i] / ((float)AVERAGE - 1));
-		}
-	}
-}
 
 void searchGesture(cv::Mat frame) {
 	cv::Mat img;
@@ -553,7 +429,7 @@ void searchGesture(cv::Mat frame) {
 		positions[positionsCount][i] = currentPositions[i];
 	}
 
-	//int test = getPositionAverageDelta(2, MIN_Y);
+	
 
 	if (enteredStates[2] == KAMEHAMÈHA_CORRECT_HAND_MOVEMENT) {
 		gesture = KAMEHAMEHA;
@@ -604,48 +480,6 @@ void searchGesture(cv::Mat frame) {
 	}
 	
 	
-
-	/*
-	int positionsAverageDelta[POSITION_VARS] = { 0, 0, 0, 0, 0, 0, 0, 0 };
-	int minus5 = positionsCount - AVERAGE;
-	if (minus5 > -1) {
-		for (int i = 0; i < POSITION_VARS; i++) {
-			for (int j = minus5; j < positionsCount; j++) {
-				if (j + 1 >= positionsCount) break;
-				positionsAverageDelta[i] += positions[j+1][i] - positions[j][i];
-			}
-			positionsAverageDelta[i] = (int)(positionsAverageDelta[i] / ((float)AVERAGE - 1));
-		}
-	}
-	else {
-		int end = AVERAGE + minus5;
-		int start = POSITIONS_ACCURACY + minus5;
-		for (int i = 0; i < POSITION_VARS; i++) {
-			for (int k = start; k < POSITIONS_ACCURACY; k++) {
-				if (k + 1 >= POSITIONS_ACCURACY) {
-					if (end > 0) {
-						positionsAverageDelta[i] += positions[0][i] - positions[k][i];
-					}
-					break;
-				}				
-				positionsAverageDelta[i] += positions[k + 1][i] - positions[k][i];
-			}
-			for (int j = 0; j < end + 1; j++) {
-				if (j + 1 >= end) break;
-				positionsAverageDelta[i] += positions[j+1][i] - positions[j][i];
-			}
-			
-			positionsAverageDelta[i] = (int)(positionsAverageDelta[i] / ((float)AVERAGE - 1));
-		}
-	}
-	*/	
-
-	/*
-	if (positionsAverageDelta[0] > -80 && positionsAverageDelta[0] < -40 && 
-		(armMaxY-armMinY) < ((int)(MY_IMAGE_HEIGHT / 3.0))					) {
-		gesture = KAMEHAMEHA;
-	}	
-	*/
 
 	if (aniFrameNumber < 2) {
 		kamehamehaX = armMinX;
@@ -816,25 +650,10 @@ int MonoLoop()
 		if (gesture == KAMEHAMEHA) {
 			cv::Mat addImg = getAniImg(aniFrameNumber);
 			if (kamehamehaX > -1 && kamehamehaX < addImg.cols && kamehamehaY > -1 && kamehamehaY < addImg.rows) {
-				addImg = resizeAndPosAnimation(addImg, 1, kamehamehaX, kamehamehaY);
+				addImg = resizeAndPosAnimation(addImg, 2, kamehamehaX, kamehamehaY);
 				cv::add(inputFrame, addImg, outputFrame);
 			}
 		}
-		
-		
-		//if (kamehamehaGestureDiscovered(inputFrame)) {
-			//cv::Mat addImg = getAniImg(aniFrameNumber);
-			//if (!aniFinished && kamehamehaX > -1 && kamehamehaX < addImg.cols && kamehamehaY > -1 && kamehamehaY < addImg.rows) {				
-				//addImg = resizeAndPosAnimation(addImg, 1, kamehamehaX, kamehamehaY);
-				//cv::add(inputFrame, addImg, outputFrame);
-			//}
-			//Löst Endlosschleife der Animation aus
-			/*
-			else {
-				aniFinished = false;
-			}
-			*/
-		//}
 
 		inputFrame.copyTo(bgImg);
 		/***************************end todo*****************************/
@@ -936,8 +755,6 @@ int _tmain(int argc, _TCHAR* argv[])
 	//CMonoLoop myLoop;
 	//  CStereoLoop myLoop;
 	// myLoop.Run();
-
-	clearMovements();
 
 	return MonoLoop();
 }
