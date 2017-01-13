@@ -55,7 +55,7 @@ enum Conditions {
 const int ENTERED_STATES_MAX = 5;
 Conditions enteredStates[ENTERED_STATES_MAX];
 int conditionWaitCount = 0;
-string cascadeKamehamehaLeft_path = "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/OpenCV_Kamehameha/Cascade Classifier/Cascade_kamehameha_left_V2.xml";
+string cascadeKamehamehaLeft_path = "../Cascade Classifier/Cascade_kamehameha_left_V2.xml";
 cv::CascadeClassifier cascadeKamehamehaLeft;
 vector<cv::Rect> cascadeKamehamehaRects;
 
@@ -63,7 +63,8 @@ vector<cv::Rect> cascadeKamehamehaRects;
 enum Gestures {
 	NO_GESTURE,
 	KAMEHAMEHA_LEFT,
-	KAMEHAMEHA_RIGHT
+	KAMEHAMEHA_RIGHT,
+	ENERGY_BALL
 };
 Gestures gesture = NO_GESTURE;
 
@@ -217,11 +218,14 @@ cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, i
 
 	int originXOffset = 0;
 	int originYOffset = (int)(newAniImgHeight / 2.0);
-	if (direction == RIGHT) {
+	if (gesture == KAMEHAMEHA_RIGHT) {
 		originXOffset = (int)(120 * resizeFactor);
 	}
-	else {
+	else if (gesture == KAMEHAMEHA_LEFT) {
 		originXOffset = (int)(520 * resizeFactor);
+	}
+	else if (gesture == ENERGY_BALL) {
+		originXOffset = (int)(newAniImgWidth / 2.0);
 	}
 
 	//Animations-Bild verschieben und clippen
@@ -358,9 +362,12 @@ cv::Mat getAniImg(int animationFrameNumber) {
 	cv::Mat aniImg;
 	stringstream path;
 	if (gesture == KAMEHAMEHA_LEFT) {
-		path << "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/OpenCV_Kamehameha/Animationen/Kamehameha-LEFT-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
+		path << "../Animationen/Kamehameha-LEFT-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
 	} else if (gesture == KAMEHAMEHA_RIGHT) {
-		path << "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/OpenCV_Kamehameha/Animationen/Kamehameha-RIGHT-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
+		path << "../Animationen/Kamehameha-RIGHT-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
+	}
+	else if (gesture == ENERGY_BALL) {
+		path << "../Animationen/Energieball-JPG-640x480/Energieball_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
 	}
 	
 	aniImg = cv::imread(path.str(), CV_LOAD_IMAGE_COLOR);
@@ -772,7 +779,7 @@ void searchGesture(cv::Mat frame) {
 	}	
 	*/
 	
-	if (gesture != KAMEHAMEHA_LEFT && gesture != KAMEHAMEHA_RIGHT) {	
+	if (gesture == NO_GESTURE) {	
 		int minY_armMinY_AvDelta = getPositionAverageDeltaBetw2Pos(2, ARM_MIN_Y, MIN_Y, 1);		
 		int speedMinX = getPositionAverageDelta(3, ARM_MIN_X, 1);
 		int speedMaxX = getPositionAverageDelta(3, ARM_MAX_X, 1);
@@ -808,6 +815,29 @@ void searchGesture(cv::Mat frame) {
 		}
 	}
 
+	if (gesture == NO_GESTURE) {
+		int speedArmMinY = getPositionAverageDelta(3, ARM_MIN_Y, 1);
+		int speedArmMaxY = getPositionAverageDelta(3, ARM_MAX_Y, 1);
+		int space = img.rows - (getLastPosition(1, ARM_MAX_Y) - getLastPosition(1, ARM_MIN_Y));
+
+		if
+		(
+			speedArmMinY != INT16_MIN && speedArmMaxY != INT16_MIN && space < INT16_MIN &&
+			speedArmMinY > -120 && speedArmMinY < -5 &&
+			speedArmMaxY > -120 && speedArmMaxY < -5 &&
+			abs(abs(speedArmMaxY) - abs(speedArmMinY)) < 15 &&
+			space < 60
+		)
+		{
+			gesture = ENERGY_BALL;
+		}
+		else
+		{
+			gesture = NO_GESTURE;
+			direction = NO_DIRECTION;
+		}
+	}
+
 	
 	if (gesture == KAMEHAMEHA_LEFT) {
 		setKamehamehaXY(ARM_MIN_X, 20, 5);
@@ -815,11 +845,13 @@ void searchGesture(cv::Mat frame) {
 	else if (gesture == KAMEHAMEHA_RIGHT) {
 		setKamehamehaXY(ARM_MAX_X, 20, 5);
 	}
-
-	
-	
-	
-	
+	else if (gesture == ENERGY_BALL) {
+		if (direction == LEFT) {
+			setKamehamehaXY(ARM_MIN_X, 20, 5);
+		} else if (direction == RIGHT) {
+			setKamehamehaXY(ARM_MAX_X, 20, 5);
+		}
+	}	
 
 	
 	/**/
