@@ -1,6 +1,10 @@
 // OpenCVLiveLoop.cpp : Definiert den Einstiegspunkt für die Konsolenanwendung.
 //
 
+#include "opencv2/objdetect/objdetect.hpp"
+#include "opencv2/highgui/highgui.hpp"
+#include "opencv2/imgproc/imgproc.hpp"
+
 #include "stdafx.h"
 #include "MonoLoop.h"
 #include "StereoLoop.h"
@@ -18,24 +22,30 @@ const int MY_WAIT_IN_MS = 20;
 cv::Mat blackImg = cv::Mat(MY_IMAGE_HEIGHT, MY_IMAGE_WIDTH, 16, cv::Scalar(0, 0, 0));
 cv::Mat bgImg;
 cv::Mat currFrame;
+const int PREV_IMG_DIFFS_SIZE = 1;
+cv::Mat prevImgDiffs[PREV_IMG_DIFFS_SIZE];
 
-vector<vector<cv::Point>> contours;
-vector<cv::Vec4i> hierarchy;
 
+//Einzelne Positions-Variablen
 int minX, minY, maxX, maxY;
 int armMinX, armMinY, armMaxX, armMaxY;
+
+//Variablen zum speichern der letzten Positions-Variablen
 const int POSITION_VARS = 8;
 const int POSITIONS_ACCURACY = 20;
-const int AVERAGE = 5;
 int positions[POSITIONS_ACCURACY][POSITION_VARS];
 int positionsAverageDelta[POSITION_VARS];
 int positionsCount = 0;
-
 enum PositionVars {
 	MIN_X, MIN_Y, MAX_X, MAX_Y,
 	ARM_MIN_X, ARM_MIN_Y, ARM_MAX_X, ARM_MAX_Y
 };
+enum Directions {
+	NO_DIRECTION, LEFT, RIGHT
+};
+Directions direction = NO_DIRECTION;
 
+//Zustände/Bedingungen, die erreicht/erfüllt werden müssen, um eine bestimmte Animation auszuführen
 enum Conditions {
 	NO_CONDITION,
 	KAMEHAMEHA_START,
@@ -45,16 +55,21 @@ enum Conditions {
 const int ENTERED_STATES_MAX = 5;
 Conditions enteredStates[ENTERED_STATES_MAX];
 int conditionWaitCount = 0;
+string cascadeKamehamehaLeft_path = "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/OpenCV_Kamehameha/Cascade Classifier/Cascade_kamehameha_left_V2.xml";
+cv::CascadeClassifier cascadeKamehamehaLeft;
+vector<cv::Rect> cascadeKamehamehaRects;
+
+//Mögliche Gesten/Animationen
+enum Gestures {
+	NO_GESTURE,
+	KAMEHAMEHA_LEFT,
+	KAMEHAMEHA_RIGHT
+};
+Gestures gesture = NO_GESTURE;
+
 
 bool firstLoop = true;
-bool aniFinished = true;
 int aniFrameNumber = 0;
-
-enum Gestures {
-	NONE,
-	KAMEHAMEHA
-};
-Gestures gesture = NONE;
 
 int kamehamehaX = (int)(MY_IMAGE_WIDTH  / 2.0);
 int kamehamehaY = (int)(MY_IMAGE_HEIGHT / 2.0);
@@ -138,6 +153,43 @@ int getPositionAverageDelta(int returnBy, PositionVars posVar, int skip = 0) {
 
 	return averageDelta;
 }
+
+int getPositionAverageDeltaBetw2Pos(int returnBy, PositionVars posVar1, PositionVars posVar2, int skip = 0) {
+	int start = positionsCount - skip;
+	if (positionsCount == 0) {
+		int a = 0;
+	}
+	int curr = 0;
+	int prev = 0;
+	int averageDelta = 0;
+	bool jump = false;
+	for (int i = start; i > (start - returnBy); i--) {
+		if (i < 0) {
+			jump = true;
+			break;
+		}
+		if (i == start) {
+			if (isEmptyPositionsEntry(i)) return INT16_MIN;
+			prev = positions[i][posVar1] - positions[i][posVar2];
+			continue;
+		}
+		if (isEmptyPositionsEntry(i)) return INT16_MIN;
+		curr = positions[i][posVar1] - positions[i][posVar2];
+		averageDelta += prev - curr;
+		prev = curr;
+	}
+	if (jump) {
+		for (int i = (POSITIONS_ACCURACY - 1); i > (POSITIONS_ACCURACY + (start - returnBy)); i--) {
+			if (isEmptyPositionsEntry(i)) return INT16_MIN;
+			curr = positions[i][posVar1] - positions[i][posVar2];
+			averageDelta += prev - curr;
+			prev = curr;
+		}
+	}
+	averageDelta = averageDelta / ((float)returnBy - 1);
+
+	return averageDelta;
+}
 /**********************************************************************************************************/
 
 void clearEnteredStates() {
@@ -152,7 +204,94 @@ void clearEnteredStates() {
 /*******************Animations-Funktionen*******************************************************************/
 cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, int originY) {
 	cv::Mat addImg;
-	int offsetX = (int)(120 * resizeFactor);
+	blackImg.copyTo(addImg);
+	cout << "originX: " << originX << "          originY: " << originY << endl;
+
+	//Animations-Bild auf passende Größe skalieren
+	int newAniImgWidth = (int)(aniImg.cols * resizeFactor);
+	int newAniImgHeight = (int)(aniImg.rows * resizeFactor);
+	cv::resize(aniImg, aniImg, cv::Size(newAniImgWidth, newAniImgHeight));	
+
+	cv::Mat aniImg_ROI;
+	aniImg.copyTo(aniImg_ROI);
+
+	int originXOffset = 0;
+	int originYOffset = (int)(newAniImgHeight / 2.0);
+	if (direction == RIGHT) {
+		originXOffset = (int)(120 * resizeFactor);
+	}
+	else {
+		originXOffset = (int)(520 * resizeFactor);
+	}
+
+	//Animations-Bild verschieben und clippen
+	int deltaX = originX - originXOffset;
+	int deltaY = originY - originYOffset;
+	cout << "deltaX: " << deltaX << "          deltaY: " << deltaY << endl;
+	cout << "aniImg-Width: " << aniImg.cols << "          aniImg-Height: " << aniImg.rows << endl;
+
+	int clippingX = 0;
+	int clippingY = 0;
+	int clippingW = 0;
+	int clippingH = 0;
+	int positionX = 0;
+	int positionY = 0;
+	if (deltaX < 0) {
+		clippingX = deltaX * (-1);
+		positionX = 0;
+		
+		clippingW = aniImg.cols + deltaX;
+		if (clippingW > addImg.cols) {
+			clippingW = addImg.cols;
+		}
+	}
+	else {
+		clippingX = 0;
+		positionX = deltaX;
+
+		clippingW = aniImg.cols;
+		if ((clippingW + deltaX) > addImg.cols) {
+			clippingW = addImg.cols - deltaX;
+		}
+	}
+	if (deltaY < 0) {
+		clippingY = deltaY * (-1);
+		positionY = 0;
+
+		clippingH = aniImg.rows + deltaY;
+		if (clippingH > addImg.rows) {
+			clippingH = addImg.rows;
+		}
+	}
+	else {
+		clippingY = 0;
+		positionY = deltaY;
+
+		clippingH = aniImg.rows;
+		if ((clippingH + deltaY) > addImg.rows) {
+			clippingH = addImg.rows - deltaY;
+		}
+	}
+
+	cout << "clippingX: " << clippingX << "          clippingY: " << clippingY << endl;
+	cout << "positionX: " << positionX << "          positionY: " << positionY << endl;
+
+	//Clippen
+	aniImg_ROI(cv::Rect(clippingX, clippingY, clippingW, clippingH)).copyTo(aniImg_ROI);
+	imshow("aniImgClipped", aniImg_ROI);
+
+	//Animations-Bild an gewünschte Position setzen
+	aniImg_ROI.copyTo(addImg(cv::Rect(positionX, positionY, aniImg_ROI.cols, aniImg_ROI.rows)));
+	imshow("aniImg_2", addImg);
+
+	/*
+	int offsetX;
+	if (direction == RIGHT) {
+		offsetX = (int)(520 * resizeFactor);
+	}
+	else {
+		offsetX = (int)(120 * resizeFactor);
+	}
 
 	//Animations-Bild auf passende Größe skalieren
 	int newAniImgWidth  = (int)(aniImg.cols * resizeFactor);
@@ -183,11 +322,13 @@ cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, i
 	clippingH = ((aniImg.rows - clippingY) > addImg.rows) ? (addImg.rows) : (aniImg.rows - clippingY - deltaY);
 
 	aniImg_ROI(cv::Rect(clippingX, clippingY, clippingW, clippingH)).copyTo(aniImg_ROI);
-	//imshow("aniImg_ROI", aniImg_ROI);
+	imshow("aniImg_ROI", aniImg_ROI);
 
 	//Animations-Bild an gewünschte Position setzen
 	aniImg_ROI.copyTo(addImg(cv::Rect(abs(deltaX), abs(deltaY), aniImg_ROI.cols, aniImg_ROI.rows)));
 	imshow("aniImg_2", addImg);
+	*/
+
 
 	return addImg;
 }
@@ -216,12 +357,18 @@ string getAnimationFrameNumberAsString(int animationFrameNumber)
 cv::Mat getAniImg(int animationFrameNumber) {
 	cv::Mat aniImg;
 	stringstream path;
-	path << "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/OpenCV_Kamehameha/Animationen/Kamehameha-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
+	if (gesture == KAMEHAMEHA_LEFT) {
+		path << "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/OpenCV_Kamehameha/Animationen/Kamehameha-LEFT-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
+	} else if (gesture == KAMEHAMEHA_RIGHT) {
+		path << "C:/Users/Nick/Studium/Medien- und Kommunikationsinformatik/6. Semester/(W) Bildverarbeitung - Labor/Aufgabe05/OpenCV_Kamehameha/Animationen/Kamehameha-RIGHT-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
+	}
+	
 	aniImg = cv::imread(path.str(), CV_LOAD_IMAGE_COLOR);
 
 	if (aniImg.data == NULL) {
 		aniFrameNumber = 0;
-		gesture = NONE;
+		gesture = NO_GESTURE;
+		direction = NO_DIRECTION;
 		clearPositions();
 	}
 	else {
@@ -292,34 +439,90 @@ bool searchPositions(cv::Mat imgDiff) {
 	}
 
 	//Arm-Bereich detektieren
-	armMinX = minX;
-	armMinY = INT16_MAX;
-	armMaxX = maxX;
-	armMaxY = -1;
-	if ((minX + (int)(150 * scaleFactor)) < imgDiffSmall.cols) {
+	int areaWidth = 150;
+	int armMinX_l = minX;
+	int armMinY_l = INT16_MAX;
+	int armMaxX_l = maxX;
+	int armMaxY_l = -1;
+	if ((minX + (int)(areaWidth * scaleFactor)) < imgDiffSmall.cols && (minX + (int)(areaWidth * scaleFactor)) > 0) {
 		for (int y1 = minY; y1 < maxY; y1++) {
-			for (int x1 = minX; x1 < minX + (int)(150 * scaleFactor); x1++) {
+			for (int x1 = minX; x1 < minX + (int)(areaWidth * scaleFactor); x1++) {
 				cv::Scalar pixel = imgDiffSmall.at<uchar>(y1, x1);
 				if (pixel.val[0] > 254) {
 
-					if (armMinY > y1) {
-						armMinY = y1;
+					if (armMinY_l > y1) {
+						armMinY_l = y1;
 					}
 					else {
-						armMinY = armMinY;
+						armMinY_l = armMinY_l;
 					}
 
-					if (armMaxY < y1) {
-						armMaxY = y1;
+					if (armMaxY_l < y1) {
+						armMaxY_l = y1;
 					}
 					else {
-						armMaxY = armMaxY;
+						armMaxY_l = armMaxY_l;
 					}
 
 				}
 			}
 		}
 	}
+	
+	cout << "maxX" << maxX - (int)(areaWidth * scaleFactor) << endl;
+	int armMinX_r = minX;
+	int armMinY_r = INT16_MAX;
+	int armMaxX_r = maxX;
+	int armMaxY_r = -1;
+	if ((maxX - (int)(areaWidth * scaleFactor)) < imgDiffSmall.cols && (maxX - (int)(areaWidth * scaleFactor)) > 0) {
+		for (int y2 = minY; y2 < maxY; y2++) {
+			for (int x2 = maxX - (int)(areaWidth * scaleFactor); x2 < maxX; x2++) {
+				cv::Scalar pixel = imgDiffSmall.at<uchar>(y2, x2);
+				if (pixel.val[0] > 254) {
+
+					if (armMinY_r > y2) {
+						armMinY_r = y2;
+					}
+					else {
+						armMinY_r = armMinY_r;
+					}
+
+					if (armMaxY_r < y2) {
+						armMaxY_r = y2;
+					}
+					else {
+						armMaxY_r = armMaxY_r;
+					}
+
+				}
+			}
+		}
+	}
+
+	armMinX = minX;
+	armMaxX = maxX;
+	if (direction == NO_DIRECTION) {
+		if (armMinY_l > armMinY_r) {
+			armMinY = armMinY_l;
+			armMaxY = armMaxY_l;
+			direction = LEFT;
+		}
+		else {
+			armMinY = armMinY_r;
+			armMaxY = armMaxY_r;
+			direction = RIGHT;
+		}
+	}
+	else if (direction == LEFT) {
+		armMinY = armMinY_l;
+		armMaxY = armMaxY_l;
+	}
+	else if (direction == RIGHT) {
+		armMinY = armMinY_r;
+		armMaxY = armMaxY_r;
+	}
+	
+
 	/*
 	int personMinX = INT16_MAX;
 	int personMinY = minY;
@@ -404,100 +607,25 @@ bool searchPositions(cv::Mat imgDiff) {
 }
 
 
-
-
-void searchGesture(cv::Mat frame) {
-	cv::Mat img;
-	frame.copyTo(img);
-
-	cv::Mat imgDiff;
-	cv::absdiff(bgImg, img, imgDiff);
-	cv::cvtColor(imgDiff, imgDiff, CV_BGR2GRAY);
-	cv::blur(imgDiff, imgDiff, cv::Size(12, 12));
-	cv::threshold(imgDiff, imgDiff, 20, 255, CV_THRESH_BINARY);/**/
-	imshow("diffImg", imgDiff);
-
-	if (!searchPositions(imgDiff)) {
-		return;
-	}
-	
-	int currentPositions[POSITION_VARS] = { minX, minY, maxX, maxY, armMinX, armMinY, armMaxX, armMaxY };
-	if (positionsCount >= POSITIONS_ACCURACY) {
-		positionsCount = 0;
-	}
-	for (int i = 0; i < POSITION_VARS; i++) {
-		positions[positionsCount][i] = currentPositions[i];
-	}
-
-	
-
-	if (enteredStates[2] == KAMEHAMÈHA_CORRECT_HAND_MOVEMENT) {
-		gesture = KAMEHAMEHA;
-		clearEnteredStates();
-	}
-	else {
-		if (enteredStates[1] == KAMEHAMEHA_DETECTED_HAND_MOVEMENT) {
-			if (conditionWaitCount < 2) {
-				int minXAverage2 = getPositionAverageDelta(2, ARM_MIN_X);
-				int minXAverage3 = getPositionAverageDelta(4, ARM_MIN_X);
-				if (minXAverage3 > -50 && minXAverage3 < -2) {
-					enteredStates[2] = KAMEHAMÈHA_CORRECT_HAND_MOVEMENT;
-					conditionWaitCount = 0;
-				}
-				else {
-					clearEnteredStates();
-				}
-			}
-			else {
-				conditionWaitCount--;
-			}
-		}
-		else {
-			if (enteredStates[0] == KAMEHAMEHA_START) {
-				int armMinYAverageDelta = getPositionAverageDelta(2, ARM_MIN_Y);
-				int prevMinYAverageDelta = getPositionAverageDelta(3, MIN_Y, 1);
-				int prevArmMinYAverageDelta = getPositionAverageDelta(3, ARM_MIN_Y, 1);
-				if (armMinYAverageDelta != INT16_MIN &&
-					prevMinYAverageDelta != INT16_MIN && prevArmMinYAverageDelta != INT16_MIN &&
-					prevMinYAverageDelta == prevArmMinYAverageDelta &&
-					/*abs(prevMinYAverageDelta) < 10 &&*/ minY != armMinY && armMinYAverageDelta > 40) {
-					enteredStates[1] = KAMEHAMEHA_DETECTED_HAND_MOVEMENT;
-					conditionWaitCount = 5;
-				}
-				else if (minY != armMinY) {
-					clearEnteredStates();
-				}
-			}
-			else {
-				int minYAverageDelta = getPositionAverageDelta(3, MIN_Y);
-				int armMinYAverageDelta = getPositionAverageDelta(3, ARM_MIN_Y);
-				if (minYAverageDelta != INT16_MIN && armMinYAverageDelta != INT16_MIN &&
-					minYAverageDelta == armMinYAverageDelta) {
-					enteredStates[0] = KAMEHAMEHA_START;
-				}
-			}
-		}
-	}
-	
-	
-
+void setKamehamehaXY(PositionVars posVarX, int boundary, int softness) {
 	if (aniFrameNumber < 2) {
-		kamehamehaX = armMinX;
+		if (posVarX == ARM_MIN_X) kamehamehaX = armMinX;
+		else if (posVarX == ARM_MAX_X) kamehamehaX = armMaxX;
+		
 		kamehamehaY = armMinY + (int)((armMaxY - armMinY) / 2);
 	}
-	else if(gesture == KAMEHAMEHA) {
-		int boundary = 20;
-		int softness = 5;
-
-		int armMinXAverage = getPositionAverageDelta(2, ARM_MIN_X);
-		int newArmMinX = 0;
-		if (abs(armMinXAverage) > boundary) {
-			if (armMinXAverage < 0) newArmMinX = getLastPosition(1, ARM_MIN_X) - softness;
-			else newArmMinX = getLastPosition(1, ARM_MIN_X) + softness;
-			manipulatePositions(positionsCount, ARM_MIN_X, newArmMinX);
+	else {
+		int xAverage = getPositionAverageDelta(2, posVarX);
+		int newX = 0;
+		if (abs(xAverage) > boundary) {
+			if (xAverage < 0) newX = getLastPosition(1, posVarX) - softness;
+			else newX = getLastPosition(1, posVarX) + softness;
+			manipulatePositions(positionsCount, posVarX, newX);
 		}
 		else {
-			newArmMinX = armMinX;
+			if(posVarX == ARM_MIN_X) newX = armMinX;
+			else if(posVarX == ARM_MAX_X) newX = armMaxX;
+			
 		}
 
 		int armMinYAverage = getPositionAverageDelta(2, ARM_MIN_Y);
@@ -521,9 +649,177 @@ void searchGesture(cv::Mat frame) {
 			newArmMaxY = armMaxY;
 		}
 
-		kamehamehaX = newArmMinX;
+		kamehamehaX = newX;
 		kamehamehaY = newArmMinY + (int)((newArmMaxY - newArmMinY) / 2);
 	}
+}
+
+
+void searchGesture(cv::Mat frame) {
+	cv::Mat img;
+	frame.copyTo(img);
+
+	cv::Mat imgDiff;
+	cv::absdiff(bgImg, img, imgDiff);
+	cv::cvtColor(imgDiff, imgDiff, CV_BGR2GRAY);
+	cv::blur(imgDiff, imgDiff, cv::Size(12, 12));
+	cv::threshold(imgDiff, imgDiff, 20, 255, CV_THRESH_BINARY);/**/
+
+	cv::Mat tempDiff;
+	imgDiff.copyTo(tempDiff);
+	for (int i = 0; i < PREV_IMG_DIFFS_SIZE; i++) {
+		if (prevImgDiffs[0].data != NULL) {
+			cv::bitwise_or(imgDiff, prevImgDiffs[0], imgDiff);
+		}
+	}
+	for (int i = 0; i < PREV_IMG_DIFFS_SIZE; i++) {
+		if (i == PREV_IMG_DIFFS_SIZE - 1) {
+			tempDiff.copyTo(prevImgDiffs[i]);
+		}
+		else {
+			prevImgDiffs[i + 1].copyTo(prevImgDiffs[i]);
+		}		
+	}
+	
+	
+	imshow("diffImg", imgDiff);
+
+	if (!searchPositions(imgDiff)) {
+		return;
+	}
+	
+	int currentPositions[POSITION_VARS] = { minX, minY, maxX, maxY, armMinX, armMinY, armMaxX, armMaxY };
+	if (positionsCount >= POSITIONS_ACCURACY) {
+		positionsCount = 0;
+	}
+	for (int i = 0; i < POSITION_VARS; i++) {
+		positions[positionsCount][i] = currentPositions[i];
+	}
+
+	
+	//enteredStates[0] = KAMEHAMEHA_START;
+	//enteredStates[1] = KAMEHAMEHA_DETECTED_HAND_MOVEMENT;
+	//Bedingungen für Kamehameha überprüfen
+	/*
+	if (gesture != KAMEHAMEHA) {
+		if (enteredStates[2] == KAMEHAMÈHA_CORRECT_HAND_MOVEMENT) {
+			gesture = KAMEHAMEHA;
+			clearEnteredStates();
+		}
+		else {
+			if (enteredStates[1] == KAMEHAMEHA_DETECTED_HAND_MOVEMENT) {
+				
+				cv::Mat greyImg;
+				img.copyTo(greyImg);
+
+				cv::cvtColor(greyImg, greyImg, CV_BGR2GRAY);
+				cv::equalizeHist(greyImg, greyImg);
+
+				cascadeKamehamehaLeft.detectMultiScale(greyImg, cascadeKamehamehaRects, 1.1, 3, 0, cv::Size(30, 30));
+				for (size_t i = 0; i < cascadeKamehamehaRects.size(); i++)
+				{
+					cv::Point center(cascadeKamehamehaRects[i].x + cascadeKamehamehaRects[i].width*0.5, cascadeKamehamehaRects[i].y + cascadeKamehamehaRects[i].height*0.5);
+					ellipse(img, center, cv::Size(cascadeKamehamehaRects[i].width*0.5, cascadeKamehamehaRects[i].height*0.5), 0, 0, 360, cv::Scalar(255, 0, 255), 4, 8, 0);
+				}
+				imshow("Grey", greyImg);
+				imshow("Detect", img);
+				
+
+				if (conditionWaitCount < 2) {
+					int minXAverage2 = getPositionAverageDelta(2, ARM_MIN_X);
+					int minXAverage3 = getPositionAverageDelta(4, ARM_MIN_X);
+					if (minXAverage3 > -50 && minXAverage3 < -2 && cascadeKamehamehaRects.size() > 0) {
+						enteredStates[2] = KAMEHAMÈHA_CORRECT_HAND_MOVEMENT;
+						conditionWaitCount = 0;
+					}
+					else {
+						clearEnteredStates();
+					}
+				}
+				else {
+					conditionWaitCount--;
+				}
+			}
+			else {
+				if (enteredStates[0] == KAMEHAMEHA_START) {
+					int test = sizeof(positions);
+					int armMinYAverageDelta = getPositionAverageDelta(2, ARM_MIN_Y);
+					int minYAverageDelta = getPositionAverageDelta(2, MIN_Y);
+					int prevMinYAverageDelta = getPositionAverageDelta(3, MIN_Y, 1);
+					int prevArmMinYAverageDelta = getPositionAverageDelta(3, ARM_MIN_Y, 1);
+					if (armMinYAverageDelta != INT16_MIN && minYAverageDelta != INT16_MIN &&
+						prevMinYAverageDelta != INT16_MIN && prevArmMinYAverageDelta != INT16_MIN &&
+						prevMinYAverageDelta == prevArmMinYAverageDelta &&
+						minY != armMinY &&
+						armMinYAverageDelta > 40 && abs(minYAverageDelta) < 20) {
+						enteredStates[1] = KAMEHAMEHA_DETECTED_HAND_MOVEMENT;
+						conditionWaitCount = 5;
+					}
+					else if (minY != armMinY) {
+						clearEnteredStates();
+					}
+				}
+				else {
+					int minYAverageDelta = getPositionAverageDelta(3, MIN_Y);
+					int armMinYAverageDelta = getPositionAverageDelta(3, ARM_MIN_Y);
+					if (minYAverageDelta != INT16_MIN && armMinYAverageDelta != INT16_MIN &&
+						minYAverageDelta == armMinYAverageDelta) {
+						enteredStates[0] = KAMEHAMEHA_START;
+					}
+				}
+			}
+		}
+	}	
+	*/
+	
+	if (gesture != KAMEHAMEHA_LEFT && gesture != KAMEHAMEHA_RIGHT) {	
+		int minY_armMinY_AvDelta = getPositionAverageDeltaBetw2Pos(2, ARM_MIN_Y, MIN_Y, 1);		
+		int speedMinX = getPositionAverageDelta(3, ARM_MIN_X, 1);
+		int speedMaxX = getPositionAverageDelta(3, ARM_MAX_X, 1);
+		int armMinXStop = getPositionAverageDelta(2, ARM_MIN_X);
+		int armMaxXStop = getPositionAverageDelta(2, ARM_MAX_X);
+
+		int space = img.rows - (getLastPosition(1, MAX_Y) - getLastPosition(1, MIN_Y));
+
+		if
+		(
+			direction == LEFT &&
+			minY_armMinY_AvDelta != INT16_MIN && speedMinX != INT16_MIN && armMinXStop != INT16_MIN && space != INT16_MIN &&
+			minY_armMinY_AvDelta > 20 && space < 60 &&
+			(armMinXStop < 5 && speedMinX > -150 && speedMinX < -50)
+		)
+		{
+			gesture = KAMEHAMEHA_LEFT;
+		}
+		else if
+		(
+			direction == RIGHT &&
+			minY_armMinY_AvDelta != INT16_MIN && speedMaxX != INT16_MIN && armMaxXStop != INT16_MIN && space != INT16_MIN &&
+			minY_armMinY_AvDelta > 20 && space < 60 &&
+			(armMaxXStop > -5 && speedMaxX < 150 && speedMaxX > 50)
+		)
+		{
+			gesture = KAMEHAMEHA_RIGHT;
+		}
+		else
+		{
+			gesture = NO_GESTURE;
+			direction = NO_DIRECTION;
+		}
+	}
+
+	
+	if (gesture == KAMEHAMEHA_LEFT) {
+		setKamehamehaXY(ARM_MIN_X, 20, 5);
+	}
+	else if (gesture == KAMEHAMEHA_RIGHT) {
+		setKamehamehaXY(ARM_MAX_X, 20, 5);
+	}
+
+	
+	
+	
+	
 
 	
 	/**/
@@ -532,71 +828,6 @@ void searchGesture(cv::Mat frame) {
 
 /**********************************************************/
 
-
-
-int MonoLoopOldStyle()
-{
-	IplImage* grabImage = 0;
-	IplImage* resultImage = 0;
-	int key;
-
-	// create window for live video
-	cvNamedWindow("Live", CV_WINDOW_AUTOSIZE);
-	// create connection to camera
-	CvCapture* capture = cvCaptureFromCAM(0);
-	// init camera
-	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_WIDTH, MY_IMAGE_WIDTH);
-	cvSetCaptureProperty(capture, CV_CAP_PROP_FRAME_HEIGHT, MY_IMAGE_HEIGHT);
-
-	// check connection to camera by grabbing a frame
-	if (!cvGrabFrame(capture))
-	{
-		cvReleaseCapture(&capture);
-		cvDestroyWindow("Live");
-		printf("Could not grab a frame\n\7");
-		return -1;
-	}
-
-	// retrieve the captured frame
-	grabImage = cvRetrieveFrame(capture);
-	// init result image, e.g. with size and depth of grabImage
-	resultImage = cvCreateImage(cvGetSize(grabImage), grabImage->depth, grabImage->nChannels);
-
-	bool continueGrabbing = true;
-	while (continueGrabbing)
-	{
-		if (!cvGrabFrame(capture))
-		{
-			cvReleaseCapture(&capture);
-			cvDestroyWindow("Live");
-			cvReleaseImage(&grabImage);
-			printf("Could not grab a frame\n\7");
-			return -1;
-		}
-		else
-		{
-			grabImage = cvRetrieveFrame(capture);
-
-			/*******************************todo*****************************/
-			cvCopy(grabImage, resultImage, NULL);
-			/***************************end todo*****************************/
-
-			cvShowImage("Live", resultImage);
-
-			key = cvWaitKey(MY_WAIT_IN_MS);
-
-			if (key == 27)
-				continueGrabbing = false;
-		}
-	}
-
-	// release all
-	cvReleaseCapture(&capture);
-	cvDestroyWindow("Live");
-	cvReleaseImage(&resultImage);
-
-	return 0;
-}
 
 int MonoLoop()
 {
@@ -647,8 +878,9 @@ int MonoLoop()
 		
 		searchGesture(inputFrame);
 
-		if (gesture == KAMEHAMEHA) {
+		if (gesture != NO_GESTURE) {
 			cv::Mat addImg = getAniImg(aniFrameNumber);
+			cout << "KamehamehaX: " << kamehamehaX << "          KamehamehaY: " << kamehamehaY << endl;
 			if (kamehamehaX > -1 && kamehamehaX < addImg.cols && kamehamehaY > -1 && kamehamehaY < addImg.rows) {
 				addImg = resizeAndPosAnimation(addImg, 2, kamehamehaX, kamehamehaY);
 				cv::add(inputFrame, addImg, outputFrame);
@@ -670,84 +902,6 @@ int MonoLoop()
 	return 0;
 }
 
-int StereoLoop()
-{
-	cv::VideoCapture cap1(0);
-	cv::VideoCapture cap2(1);
-
-	if (!cap1.isOpened())
-	{
-		cout << "Cannot open the video cam [0]" << endl;
-		return -1;
-	}
-
-	if (!cap2.isOpened())
-	{
-		cout << "Cannot open the video cam [1]" << endl;
-		return -1;
-	}
-
-	// Set cameras to 15fps (if wanted!!!)
-	cap1.set(CV_CAP_PROP_FPS, 15);
-	cap2.set(CV_CAP_PROP_FPS, 15);
-
-	double dWidth1 = cap1.get(CV_CAP_PROP_FRAME_WIDTH);
-	double dHeight1 = cap1.get(CV_CAP_PROP_FRAME_HEIGHT);
-	double dWidth2 = cap2.get(CV_CAP_PROP_FRAME_WIDTH);
-	double dHeight2 = cap2.get(CV_CAP_PROP_FRAME_HEIGHT);
-
-	// Set image size
-	cap1.set(CV_CAP_PROP_FRAME_WIDTH, MY_IMAGE_WIDTH);
-	cap1.set(CV_CAP_PROP_FRAME_HEIGHT, MY_IMAGE_HEIGHT);
-	cap2.set(CV_CAP_PROP_FRAME_WIDTH, MY_IMAGE_WIDTH);
-	cap2.set(CV_CAP_PROP_FRAME_HEIGHT, MY_IMAGE_HEIGHT);
-
-	// display the frame size that OpenCV has picked in order to check 
-	cout << "cam[0] Frame size: " << dWidth1 << " x " << dHeight1 << endl;
-	cout << "cam[1] Frame size: " << dWidth2 << " x " << dHeight2 << endl;
-	cv::namedWindow("cam[0]", CV_WINDOW_AUTOSIZE);
-	cv::namedWindow("cam[1]", CV_WINDOW_AUTOSIZE);
-
-	cv::Mat inputFrame1, inputFrame2;
-	cv::Mat outputFrame1, outputFrame2;
-
-	while (1)
-	{
-
-		bool bSuccess1 = cap1.read(inputFrame1);
-		bool bSuccess2 = cap2.read(inputFrame2);
-
-		if (!bSuccess1)
-		{
-			cout << "Cannot read a frame from video stream [0]" << endl;
-			break;
-		}
-
-		if (!bSuccess2)
-		{
-			cout << "Cannot read a frame from video stream [1]" << endl;
-			break;
-		}
-
-
-		/*******************************todo*****************************/
-		outputFrame1 = inputFrame1;
-		outputFrame2 = inputFrame2;
-		/***************************end todo*****************************/
-
-
-		imshow("cam[0]", outputFrame1);
-		imshow("cam[1]", outputFrame2);
-
-		if (cv::waitKey(MY_WAIT_IN_MS) == 27)
-		{
-			cout << "ESC key is pressed by user" << endl;
-			break;
-		}
-	}
-	return 0;
-}
-
 
 
 int _tmain(int argc, _TCHAR* argv[])
@@ -755,6 +909,10 @@ int _tmain(int argc, _TCHAR* argv[])
 	//CMonoLoop myLoop;
 	//  CStereoLoop myLoop;
 	// myLoop.Run();
+
+	if(!cascadeKamehamehaLeft.load(cascadeKamehamehaLeft_path)) {
+		printf("--(!)Error loading\n"); return -1; 
+	};
 
 	return MonoLoop();
 }
