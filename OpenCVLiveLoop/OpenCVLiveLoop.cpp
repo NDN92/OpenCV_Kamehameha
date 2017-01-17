@@ -31,14 +31,15 @@ int minX, minY, maxX, maxY;
 int armMinX, armMinY, armMaxX, armMaxY;
 
 //Variablen zum speichern der letzten Positions-Variablen
-const int POSITION_VARS = 8;
+const int POSITION_VARS = 9;
 const int POSITIONS_ACCURACY = 20;
 int positions[POSITIONS_ACCURACY][POSITION_VARS];
 int positionsAverageDelta[POSITION_VARS];
 int positionsCount = 0;
 enum PositionVars {
 	MIN_X, MIN_Y, MAX_X, MAX_Y,
-	ARM_MIN_X, ARM_MIN_Y, ARM_MAX_X, ARM_MAX_Y
+	ARM_MIN_X, ARM_MIN_Y, ARM_MAX_X, ARM_MAX_Y,
+	DIRECTION
 };
 enum Directions {
 	NO_DIRECTION, LEFT, RIGHT
@@ -64,16 +65,23 @@ enum Gestures {
 	NO_GESTURE,
 	KAMEHAMEHA_LEFT,
 	KAMEHAMEHA_RIGHT,
-	ENERGY_BALL
+	ENERGY_BALL_LEFT,
+	ENERGY_BALL_RIGHT
 };
 Gestures gesture = NO_GESTURE;
+
+float gestureScaleFactor = 2;
+float distanceFactor = 1;
 
 
 bool firstLoop = true;
 int aniFrameNumber = 0;
 
-int kamehamehaX = (int)(MY_IMAGE_WIDTH  / 2.0);
-int kamehamehaY = (int)(MY_IMAGE_HEIGHT / 2.0);
+const int WAIT_AFTER_ANI = 20;
+int waitAfterAniCount = 0;
+
+int aniOriginX = (int)(MY_IMAGE_WIDTH / 2.0);
+int aniOriginY = (int)(MY_IMAGE_HEIGHT / 2.0);
 
 
 
@@ -119,6 +127,8 @@ int getLastPosition(int returnBy, PositionVars posVar) {
 }
 
 int getPositionAverageDelta(int returnBy, PositionVars posVar, int skip = 0) {
+	if (posVar == DIRECTION) return INT16_MIN;
+
 	int start = positionsCount - skip;
 	if (positionsCount == 0) {
 		int a = 0;
@@ -156,6 +166,8 @@ int getPositionAverageDelta(int returnBy, PositionVars posVar, int skip = 0) {
 }
 
 int getPositionAverageDeltaBetw2Pos(int returnBy, PositionVars posVar1, PositionVars posVar2, int skip = 0) {
+	if (posVar1 == DIRECTION || posVar2 == DIRECTION) return INT16_MIN;
+
 	int start = positionsCount - skip;
 	if (positionsCount == 0) {
 		int a = 0;
@@ -224,8 +236,11 @@ cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, i
 	else if (gesture == KAMEHAMEHA_LEFT) {
 		originXOffset = (int)(520 * resizeFactor);
 	}
-	else if (gesture == ENERGY_BALL) {
-		originXOffset = (int)(newAniImgWidth / 2.0);
+	else if (gesture == ENERGY_BALL_RIGHT) {
+		originXOffset = (int)((newAniImgWidth / 2.0) + (50 * distanceFactor));
+	}
+	else if (gesture == ENERGY_BALL_LEFT) {
+		originXOffset = (int)((newAniImgWidth / 2.0) - (50 * distanceFactor));
 	}
 
 	//Animations-Bild verschieben und clippen
@@ -287,53 +302,6 @@ cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, i
 	//Animations-Bild an gewünschte Position setzen
 	aniImg_ROI.copyTo(addImg(cv::Rect(positionX, positionY, aniImg_ROI.cols, aniImg_ROI.rows)));
 	imshow("aniImg_2", addImg);
-
-	/*
-	int offsetX;
-	if (direction == RIGHT) {
-		offsetX = (int)(520 * resizeFactor);
-	}
-	else {
-		offsetX = (int)(120 * resizeFactor);
-	}
-
-	//Animations-Bild auf passende Größe skalieren
-	int newAniImgWidth  = (int)(aniImg.cols * resizeFactor);
-	int newAniImgHeight = (int)(aniImg.rows * resizeFactor);
-	cv::resize(aniImg, aniImg, cv::Size(newAniImgWidth, newAniImgHeight));
-	//imshow("aniImg_resized", aniImg);
-
-	blackImg.copyTo(addImg);
-
-	//Animations-Bild verschieben und clippen
-	cv::Mat aniImg_ROI;
-	aniImg.copyTo(aniImg_ROI);
-
-	int deltaX = addImg.cols - aniImg.cols - (addImg.cols - originX) + offsetX;
-	int deltaY = addImg.rows - aniImg.rows - (addImg.rows - originY) + (int)(aniImg.rows / 2.0);
-
-	int clippingX, clippingY, clippingW, clippingH;
-	if (deltaX < 0) {
-		clippingX = deltaX * (-1);
-		deltaX = 0;
-	}
-	else clippingX = 0;
-	if (deltaY < 0) {
-		clippingY = deltaY * (-1);
-		deltaY = 0;
-	} else clippingY = 0;
-	clippingW = ((aniImg.cols - clippingX) > addImg.cols) ? (addImg.cols) : (aniImg.cols - clippingX - deltaX);
-	clippingH = ((aniImg.rows - clippingY) > addImg.rows) ? (addImg.rows) : (aniImg.rows - clippingY - deltaY);
-
-	aniImg_ROI(cv::Rect(clippingX, clippingY, clippingW, clippingH)).copyTo(aniImg_ROI);
-	imshow("aniImg_ROI", aniImg_ROI);
-
-	//Animations-Bild an gewünschte Position setzen
-	aniImg_ROI.copyTo(addImg(cv::Rect(abs(deltaX), abs(deltaY), aniImg_ROI.cols, aniImg_ROI.rows)));
-	imshow("aniImg_2", addImg);
-	*/
-
-
 	return addImg;
 }
 
@@ -366,7 +334,7 @@ cv::Mat getAniImg(int animationFrameNumber) {
 	} else if (gesture == KAMEHAMEHA_RIGHT) {
 		path << "../Animationen/Kamehameha-RIGHT-JPG-640x480/Kamehameha_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
 	}
-	else if (gesture == ENERGY_BALL) {
+	else if (gesture == ENERGY_BALL_LEFT || gesture == ENERGY_BALL_RIGHT) {
 		path << "../Animationen/Energieball-JPG-640x480/Energieball_" << getAnimationFrameNumberAsString(animationFrameNumber) << ".jpg";
 	}
 	
@@ -376,6 +344,7 @@ cv::Mat getAniImg(int animationFrameNumber) {
 		aniFrameNumber = 0;
 		gesture = NO_GESTURE;
 		direction = NO_DIRECTION;
+		waitAfterAniCount = WAIT_AFTER_ANI;
 		clearPositions();
 	}
 	else {
@@ -446,7 +415,7 @@ bool searchPositions(cv::Mat imgDiff) {
 	}
 
 	//Arm-Bereich detektieren
-	int areaWidth = 150;
+	int areaWidth = (int)(150 * distanceFactor);
 	int armMinX_l = minX;
 	int armMinY_l = INT16_MAX;
 	int armMaxX_l = maxX;
@@ -606,6 +575,9 @@ bool searchPositions(cv::Mat imgDiff) {
 		//cv::rectangle(imgGraphics, cv::Rect(cv::Point(personMinX, personMinY), cv::Point(personMaxX, personMaxY)), cv::Scalar(0, 255, 255), 1);
 		cv::rectangle(imgGraphics, cv::Rect(cv::Point(armMinX, armMinY), cv::Point(armMaxX, armMaxY)), cv::Scalar(0, 255, 0), 1);
 
+		stringstream path;
+		path << "../Test-IMGs/imGraphics" << positionsCount << ".jpg";
+		cv::imwrite(path.str(), imgGraphics);
 		imshow("imgGraphics", imgGraphics);
 		/****************************/
 		return true;
@@ -614,12 +586,13 @@ bool searchPositions(cv::Mat imgDiff) {
 }
 
 
-void setKamehamehaXY(PositionVars posVarX, int boundary, int softness) {
+void setKamehamehaProperties(PositionVars posVarX, int boundary, int softness) {
+	gestureScaleFactor = 2;
 	if (aniFrameNumber < 2) {
-		if (posVarX == ARM_MIN_X) kamehamehaX = armMinX;
-		else if (posVarX == ARM_MAX_X) kamehamehaX = armMaxX;
+		if (posVarX == ARM_MIN_X) aniOriginX = armMinX;
+		else if (posVarX == ARM_MAX_X) aniOriginX = armMaxX;
 		
-		kamehamehaY = armMinY + (int)((armMaxY - armMinY) / 2);
+		aniOriginY = armMinY + (int)((armMaxY - armMinY) / 2);
 	}
 	else {
 		int xAverage = getPositionAverageDelta(2, posVarX);
@@ -656,8 +629,75 @@ void setKamehamehaXY(PositionVars posVarX, int boundary, int softness) {
 			newArmMaxY = armMaxY;
 		}
 
-		kamehamehaX = newX;
-		kamehamehaY = newArmMinY + (int)((newArmMaxY - newArmMinY) / 2);
+		aniOriginX = newX;
+		aniOriginY = newArmMinY + (int)((newArmMaxY - newArmMinY) / 2);
+	}
+}
+
+void setEnergyBallProperties(PositionVars posVarX, int boundary, int softness) {	
+	if (aniFrameNumber < 2) {
+		if (posVarX == ARM_MIN_X) aniOriginX = armMinX;
+		else if (posVarX == ARM_MAX_X) aniOriginX = armMaxX;
+
+		aniOriginY = armMinY + (int)((armMaxY - armMinY) / 2);
+		gestureScaleFactor = 0.9;
+	}
+	else {
+		int xAverage = getPositionAverageDelta(2, posVarX);
+		int newX = 0;
+		if (abs(xAverage) > boundary) {
+			if (xAverage < 0) newX = getLastPosition(1, posVarX) - softness;
+			else newX = getLastPosition(1, posVarX) + softness;
+			manipulatePositions(positionsCount, posVarX, newX);
+		}
+		else {
+			if (posVarX == ARM_MIN_X) newX = armMinX;
+			else if (posVarX == ARM_MAX_X) newX = armMaxX;
+
+		}
+
+		int armMinYAverage = getPositionAverageDelta(2, ARM_MIN_Y);
+		int newArmMinY = 0;
+		if (abs(armMinYAverage) > boundary) {
+			if (armMinYAverage < 0) newArmMinY = getLastPosition(1, ARM_MIN_Y) - softness;
+			else newArmMinY = getLastPosition(1, ARM_MIN_Y) + softness;
+			manipulatePositions(positionsCount, ARM_MIN_Y, newArmMinY);
+		}
+		else {
+			newArmMinY = armMinY;
+		}
+		int armMaxYAverage = getPositionAverageDelta(2, ARM_MAX_Y);
+		int newArmMaxY = 0;
+		if (abs(armMaxYAverage) > boundary) {
+			if (armMaxYAverage < 0) newArmMaxY = getLastPosition(1, ARM_MAX_Y) - softness;
+			else newArmMaxY = getLastPosition(1, ARM_MAX_Y) + softness;
+			manipulatePositions(positionsCount, ARM_MAX_Y, newArmMaxY);
+		}
+		else {
+			newArmMaxY = armMaxY;
+		}
+
+		aniOriginX = newX;
+		aniOriginY = newArmMinY + (int)((newArmMaxY - newArmMinY) / 2);
+
+		int armsHeight = newArmMaxY - newArmMinY;
+		int armsMinHeight = (int)(100 * distanceFactor);
+		int armsMaxHeight = (int)(500 * distanceFactor);
+		int armsHeightDiff = armsMaxHeight - armsMinHeight;
+		float armsMinHeightFactor = 0 * distanceFactor;
+		float armsMaxHeightFactor = 2.5 * distanceFactor;
+		float armsHeightFactorDiff = armsMaxHeightFactor - armsMinHeightFactor;
+
+		int interimResult1 = armsHeight - armsMinHeight;
+		if (interimResult1 <= 0) {
+			gestureScaleFactor = 1;
+		}
+		else {
+			float interimResult2 = ((float)armsHeightDiff) / ((float)interimResult1);
+			float interimResult3 = armsHeightFactorDiff / interimResult2;
+			float interimResult4 = armsMinHeightFactor + interimResult3;
+			gestureScaleFactor = interimResult4;
+		}
 	}
 }
 
@@ -691,11 +731,15 @@ void searchGesture(cv::Mat frame) {
 	
 	imshow("diffImg", imgDiff);
 
+	if (waitAfterAniCount != 0) {
+		waitAfterAniCount--;
+		return;
+	}
 	if (!searchPositions(imgDiff)) {
 		return;
 	}
 	
-	int currentPositions[POSITION_VARS] = { minX, minY, maxX, maxY, armMinX, armMinY, armMaxX, armMaxY };
+	int currentPositions[POSITION_VARS] = { minX, minY, maxX, maxY, armMinX, armMinY, armMaxX, armMaxY, direction };
 	if (positionsCount >= POSITIONS_ACCURACY) {
 		positionsCount = 0;
 	}
@@ -792,8 +836,8 @@ void searchGesture(cv::Mat frame) {
 		(
 			direction == LEFT &&
 			minY_armMinY_AvDelta != INT16_MIN && speedMinX != INT16_MIN && armMinXStop != INT16_MIN && space != INT16_MIN &&
-			minY_armMinY_AvDelta > 20 && space < 60 &&
-			(armMinXStop < 5 && speedMinX > -150 && speedMinX < -50)
+			minY_armMinY_AvDelta > (int)(20 * distanceFactor) && space < (int)(60 * distanceFactor) &&
+			(armMinXStop < (int)(5 * distanceFactor) && speedMinX > (int)(-150 * distanceFactor) && speedMinX < (int)(-50 * distanceFactor))
 		)
 		{
 			gesture = KAMEHAMEHA_LEFT;
@@ -802,8 +846,8 @@ void searchGesture(cv::Mat frame) {
 		(
 			direction == RIGHT &&
 			minY_armMinY_AvDelta != INT16_MIN && speedMaxX != INT16_MIN && armMaxXStop != INT16_MIN && space != INT16_MIN &&
-			minY_armMinY_AvDelta > 20 && space < 60 &&
-			(armMaxXStop > -5 && speedMaxX < 150 && speedMaxX > 50)
+			minY_armMinY_AvDelta > (int)(20 * distanceFactor) && space < (int)(60 * distanceFactor) &&
+			(armMaxXStop > (int)(-5 * distanceFactor) && speedMaxX < (int)(150 * distanceFactor) && speedMaxX > (int)(50 * distanceFactor))
 		)
 		{
 			gesture = KAMEHAMEHA_RIGHT;
@@ -816,43 +860,56 @@ void searchGesture(cv::Mat frame) {
 	}
 
 	if (gesture == NO_GESTURE) {
-		int speedArmMinY = getPositionAverageDelta(3, ARM_MIN_Y, 1);
-		int speedArmMaxY = getPositionAverageDelta(3, ARM_MAX_Y, 1);
+		int startHeight = getLastPosition(7, ARM_MAX_Y) - getLastPosition(7, ARM_MIN_Y);
+		int endHeight = armMaxY - armMinY;
+		int speedArmMinY = getPositionAverageDelta(7, ARM_MIN_Y);
+		int speedArmMaxY = getPositionAverageDelta(7, ARM_MAX_Y);
 		int space = img.rows - (getLastPosition(1, ARM_MAX_Y) - getLastPosition(1, ARM_MIN_Y));
-
+		/**/
 		if
 		(
-			speedArmMinY != INT16_MIN && speedArmMaxY != INT16_MIN && space < INT16_MIN &&
-			speedArmMinY > -120 && speedArmMinY < -5 &&
-			speedArmMaxY > -120 && speedArmMaxY < -5 &&
-			abs(abs(speedArmMaxY) - abs(speedArmMinY)) < 15 &&
-			space < 60
+			speedArmMinY != INT16_MIN && speedArmMaxY != INT16_MIN && space > INT16_MIN &&
+			speedArmMinY > (int)(-50 * distanceFactor) && speedArmMinY < (int)(-2 * distanceFactor) &&
+			speedArmMaxY > (int)(2 * distanceFactor) && speedArmMaxY < (int)(50 * distanceFactor) &&
+			abs(abs(speedArmMaxY) - abs(speedArmMinY)) < (int)(20 * distanceFactor) &&
+			startHeight > (int)(90 * distanceFactor) && startHeight < (int)(150 * distanceFactor) &&
+			endHeight > (int)(360 * distanceFactor)
 		)
 		{
-			gesture = ENERGY_BALL;
+			if (getLastPosition(7, DIRECTION) == LEFT) {
+				direction = LEFT;
+				gesture = ENERGY_BALL_LEFT;
+			}
+			else if (getLastPosition(7, DIRECTION) == RIGHT) {
+				direction = RIGHT;
+				gesture = ENERGY_BALL_RIGHT;
+			}
+			else {
+				gesture = NO_GESTURE;
+				direction = NO_DIRECTION;
+			}
 		}
 		else
 		{
 			gesture = NO_GESTURE;
 			direction = NO_DIRECTION;
 		}
+		
 	}
 
 	
 	if (gesture == KAMEHAMEHA_LEFT) {
-		setKamehamehaXY(ARM_MIN_X, 20, 5);
+		setKamehamehaProperties(ARM_MIN_X, 20, 5);
 	}
 	else if (gesture == KAMEHAMEHA_RIGHT) {
-		setKamehamehaXY(ARM_MAX_X, 20, 5);
+		setKamehamehaProperties(ARM_MAX_X, 20, 5);
 	}
-	else if (gesture == ENERGY_BALL) {
-		if (direction == LEFT) {
-			setKamehamehaXY(ARM_MIN_X, 20, 5);
-		} else if (direction == RIGHT) {
-			setKamehamehaXY(ARM_MAX_X, 20, 5);
-		}
+	else if (gesture == ENERGY_BALL_LEFT) {
+		setEnergyBallProperties(ARM_MIN_X, 20, 5);
 	}	
-
+	else if (gesture == ENERGY_BALL_RIGHT) {
+		setEnergyBallProperties(ARM_MAX_X, 20, 5);
+	}
 	
 	/**/
 	positionsCount++;
@@ -912,9 +969,9 @@ int MonoLoop()
 
 		if (gesture != NO_GESTURE) {
 			cv::Mat addImg = getAniImg(aniFrameNumber);
-			cout << "KamehamehaX: " << kamehamehaX << "          KamehamehaY: " << kamehamehaY << endl;
-			if (kamehamehaX > -1 && kamehamehaX < addImg.cols && kamehamehaY > -1 && kamehamehaY < addImg.rows) {
-				addImg = resizeAndPosAnimation(addImg, 2, kamehamehaX, kamehamehaY);
+			cout << "aniOriginX: " << aniOriginX << "          aniOriginY: " << aniOriginY << endl;
+			if (aniOriginX > -1 && aniOriginX < addImg.cols && aniOriginY > -1 && aniOriginY < addImg.rows) {
+				addImg = resizeAndPosAnimation(addImg, gestureScaleFactor, aniOriginX, aniOriginY);
 				cv::add(inputFrame, addImg, outputFrame);
 			}
 		}
