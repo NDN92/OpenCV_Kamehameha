@@ -20,6 +20,8 @@ const int MY_WAIT_IN_MS = 20;
 
 /**********************************************************/
 cv::Mat blackImg = cv::Mat(MY_IMAGE_HEIGHT, MY_IMAGE_WIDTH, 16, cv::Scalar(0, 0, 0));
+cv::Mat kamehamehaLightImg = cv::Mat(MY_IMAGE_HEIGHT, MY_IMAGE_WIDTH, 16, cv::Scalar(80, 50, 40));
+cv::Mat energyballLightImg = cv::Mat(MY_IMAGE_HEIGHT, MY_IMAGE_WIDTH, 16, cv::Scalar(40, 50, 80));
 cv::Mat bgImg;
 cv::Mat currFrame;
 const int PREV_IMG_DIFFS_SIZE = 1;
@@ -77,12 +79,30 @@ float distanceFactor = 1;
 bool firstLoop = true;
 int aniFrameNumber = 0;
 
-const int WAIT_AFTER_ANI = 20;
+const int WAIT_AFTER_ANI = 50;
 int waitAfterAniCount = 0;
 
 int aniOriginX = (int)(MY_IMAGE_WIDTH / 2.0);
 int aniOriginY = (int)(MY_IMAGE_HEIGHT / 2.0);
 
+
+/******************************************Affen-Game*******************************/
+bool activateGame = false;
+int aniFrameNumberAffe = 0;
+enum MonkeyAction {
+	WALK,
+	STAND,
+	DIE
+};
+MonkeyAction monkeyAction = WALK;
+cv::Point monkeyP = cv::Point(-200, 150);
+bool isMonkeyDead = false;
+const int WAIT_AFTER_MONKEY_IS_DEAD = 30;
+int waitAfterMonkeyIsDeadCount = WAIT_AFTER_MONKEY_IS_DEAD;
+int killedMonkeyCount = 0;
+int walkPath = 0;
+bool isMonkeyDirectionRight = true;
+/******************************************Affen-Game*******************************/
 
 
 /*******************Positions-Funktionen************************************************************************/
@@ -126,13 +146,48 @@ int getLastPosition(int returnBy, PositionVars posVar) {
 	}
 }
 
+int getHighestPositionJump(int returnBy, PositionVars posVar, int skip = 0) {
+	if (posVar == DIRECTION) return INT16_MIN;
+
+	int start = positionsCount - skip;
+	int curr = 0;
+	int prev = 0;
+	int delta = 0;
+	int deltaMax = INT16_MIN;
+	bool jump = false;
+	for (int i = start; i > (start - returnBy); i--) {
+		if (i < 0) {
+			jump = true;
+			break;
+		}
+		if (i == start) {
+			if (isEmptyPositionsEntry(i)) return INT16_MIN;
+			prev = positions[i][posVar];
+			continue;
+		}
+		if (isEmptyPositionsEntry(i)) return INT16_MIN;
+		curr = positions[i][posVar];
+		delta = abs(prev - curr);
+		if (deltaMax < delta) deltaMax = delta;
+		prev = curr;
+	}
+	if (jump) {
+		for (int i = (POSITIONS_ACCURACY - 1); i > (POSITIONS_ACCURACY + (start - returnBy)); i--) {
+			if (isEmptyPositionsEntry(i)) return INT16_MIN;
+			curr = positions[i][posVar];
+			delta = abs(prev - curr);
+			if (deltaMax < delta) deltaMax = delta;
+			prev = curr;
+		}
+	}
+
+	return deltaMax;
+}
+
 int getPositionAverageDelta(int returnBy, PositionVars posVar, int skip = 0) {
 	if (posVar == DIRECTION) return INT16_MIN;
 
 	int start = positionsCount - skip;
-	if (positionsCount == 0) {
-		int a = 0;
-	}
 	int curr = 0;
 	int prev = 0;
 	int averageDelta = 0;
@@ -169,9 +224,6 @@ int getPositionAverageDeltaBetw2Pos(int returnBy, PositionVars posVar1, Position
 	if (posVar1 == DIRECTION || posVar2 == DIRECTION) return INT16_MIN;
 
 	int start = positionsCount - skip;
-	if (positionsCount == 0) {
-		int a = 0;
-	}
 	int curr = 0;
 	int prev = 0;
 	int averageDelta = 0;
@@ -351,6 +403,100 @@ cv::Mat getAniImg(int animationFrameNumber) {
 		aniFrameNumber++;
 	}
 	
+	return aniImg;
+}
+
+
+
+
+void overlayImage(const cv::Mat &background, const cv::Mat &foreground,
+	cv::Mat &output, cv::Point2i location)
+{
+	background.copyTo(output);
+
+
+	// start at the row indicated by location, or at row 0 if location.y is negative.
+	for (int y = std::max(location.y, 0); y < background.rows; ++y)
+	{
+		int fY = y - location.y; // because of the translation
+
+								 // we are done of we have processed all rows of the foreground image.
+		if (fY >= foreground.rows)
+			break;
+
+		// start at the column indicated by location, 
+
+		// or at column 0 if location.x is negative.
+		for (int x = std::max(location.x, 0); x < background.cols; ++x)
+		{
+			int fX = x - location.x; // because of the translation.
+
+									 // we are done with this row if the column is outside of the foreground image.
+			if (fX >= foreground.cols)
+				break;
+
+			// determine the opacity of the foregrond pixel, using its fourth (alpha) channel.
+			double opacity =
+				((double)foreground.data[fY * foreground.step + fX * foreground.channels() + 3])
+
+				/ 255.;
+
+
+			// and now combine the background and foreground pixel, using the opacity, 
+
+			// but only if opacity > 0.
+			for (int c = 0; opacity > 0 && c < output.channels(); ++c)
+			{
+				unsigned char foregroundPx =
+					foreground.data[fY * foreground.step + fX * foreground.channels() + c];
+				unsigned char backgroundPx =
+					background.data[y * background.step + x * background.channels() + c];
+				output.data[y*output.step + output.channels()*x + c] =
+					backgroundPx * (1. - opacity) + foregroundPx * opacity;
+			}
+		}
+	}
+}
+cv::Mat getAniImgAffe(MonkeyAction monkeyAction) {
+	cv::Mat aniImg;
+	stringstream path;
+	if (monkeyAction == WALK) {
+		path << "../Animationen/Game/AffeWalk/Affe" << aniFrameNumberAffe << ".png";
+	}
+	else if (monkeyAction == STAND) {
+		path << "../Animationen/Game/AffeStand/Affe" << aniFrameNumberAffe << ".png";
+	}
+	else if (monkeyAction == DIE) {
+		path << "../Animationen/Game/AffeDie/Affe" << aniFrameNumberAffe << ".png";
+	}
+
+	aniImg = cv::imread(path.str(), CV_LOAD_IMAGE_UNCHANGED);
+
+	if (aniImg.data == NULL && monkeyAction == DIE) {
+		isMonkeyDead = true;
+		aniFrameNumberAffe = 0;
+	}
+	else if (aniImg.data == NULL) {
+		aniFrameNumberAffe = 0;
+
+		stringstream path2;
+		if (monkeyAction == WALK) {
+			path2 << "../Animationen/Game/AffeWalk/Affe" << aniFrameNumberAffe << ".png";
+		}
+		else if (monkeyAction == STAND) {
+			path2 << "../Animationen/Game/AffeStand/Affe" << aniFrameNumberAffe << ".png";
+		}
+		else if (monkeyAction == DIE) {
+			path2 << "../Animationen/Game/AffeDie/Affe" << aniFrameNumberAffe << ".png";
+		}
+
+		aniImg = cv::imread(path2.str(), CV_LOAD_IMAGE_UNCHANGED);
+		aniFrameNumberAffe++;
+	}
+	else {
+		aniFrameNumberAffe++;
+	}
+
 	return aniImg;
 }
 /**********************************************************************************************************/
@@ -748,80 +894,6 @@ void searchGesture(cv::Mat frame) {
 	}
 
 	
-	//enteredStates[0] = KAMEHAMEHA_START;
-	//enteredStates[1] = KAMEHAMEHA_DETECTED_HAND_MOVEMENT;
-	//Bedingungen für Kamehameha überprüfen
-	/*
-	if (gesture != KAMEHAMEHA) {
-		if (enteredStates[2] == KAMEHAMÈHA_CORRECT_HAND_MOVEMENT) {
-			gesture = KAMEHAMEHA;
-			clearEnteredStates();
-		}
-		else {
-			if (enteredStates[1] == KAMEHAMEHA_DETECTED_HAND_MOVEMENT) {
-				
-				cv::Mat greyImg;
-				img.copyTo(greyImg);
-
-				cv::cvtColor(greyImg, greyImg, CV_BGR2GRAY);
-				cv::equalizeHist(greyImg, greyImg);
-
-				cascadeKamehamehaLeft.detectMultiScale(greyImg, cascadeKamehamehaRects, 1.1, 3, 0, cv::Size(30, 30));
-				for (size_t i = 0; i < cascadeKamehamehaRects.size(); i++)
-				{
-					cv::Point center(cascadeKamehamehaRects[i].x + cascadeKamehamehaRects[i].width*0.5, cascadeKamehamehaRects[i].y + cascadeKamehamehaRects[i].height*0.5);
-					ellipse(img, center, cv::Size(cascadeKamehamehaRects[i].width*0.5, cascadeKamehamehaRects[i].height*0.5), 0, 0, 360, cv::Scalar(255, 0, 255), 4, 8, 0);
-				}
-				imshow("Grey", greyImg);
-				imshow("Detect", img);
-				
-
-				if (conditionWaitCount < 2) {
-					int minXAverage2 = getPositionAverageDelta(2, ARM_MIN_X);
-					int minXAverage3 = getPositionAverageDelta(4, ARM_MIN_X);
-					if (minXAverage3 > -50 && minXAverage3 < -2 && cascadeKamehamehaRects.size() > 0) {
-						enteredStates[2] = KAMEHAMÈHA_CORRECT_HAND_MOVEMENT;
-						conditionWaitCount = 0;
-					}
-					else {
-						clearEnteredStates();
-					}
-				}
-				else {
-					conditionWaitCount--;
-				}
-			}
-			else {
-				if (enteredStates[0] == KAMEHAMEHA_START) {
-					int test = sizeof(positions);
-					int armMinYAverageDelta = getPositionAverageDelta(2, ARM_MIN_Y);
-					int minYAverageDelta = getPositionAverageDelta(2, MIN_Y);
-					int prevMinYAverageDelta = getPositionAverageDelta(3, MIN_Y, 1);
-					int prevArmMinYAverageDelta = getPositionAverageDelta(3, ARM_MIN_Y, 1);
-					if (armMinYAverageDelta != INT16_MIN && minYAverageDelta != INT16_MIN &&
-						prevMinYAverageDelta != INT16_MIN && prevArmMinYAverageDelta != INT16_MIN &&
-						prevMinYAverageDelta == prevArmMinYAverageDelta &&
-						minY != armMinY &&
-						armMinYAverageDelta > 40 && abs(minYAverageDelta) < 20) {
-						enteredStates[1] = KAMEHAMEHA_DETECTED_HAND_MOVEMENT;
-						conditionWaitCount = 5;
-					}
-					else if (minY != armMinY) {
-						clearEnteredStates();
-					}
-				}
-				else {
-					int minYAverageDelta = getPositionAverageDelta(3, MIN_Y);
-					int armMinYAverageDelta = getPositionAverageDelta(3, ARM_MIN_Y);
-					if (minYAverageDelta != INT16_MIN && armMinYAverageDelta != INT16_MIN &&
-						minYAverageDelta == armMinYAverageDelta) {
-						enteredStates[0] = KAMEHAMEHA_START;
-					}
-				}
-			}
-		}
-	}	
-	*/
 	
 	if (gesture == NO_GESTURE) {	
 		int minY_armMinY_AvDelta = getPositionAverageDeltaBetw2Pos(2, ARM_MIN_Y, MIN_Y, 1);		
@@ -829,6 +901,10 @@ void searchGesture(cv::Mat frame) {
 		int speedMaxX = getPositionAverageDelta(3, ARM_MAX_X, 1);
 		int armMinXStop = getPositionAverageDelta(2, ARM_MIN_X);
 		int armMaxXStop = getPositionAverageDelta(2, ARM_MAX_X);
+		int maxDeltaArmMinX = getHighestPositionJump(3, ARM_MIN_X);
+		int maxDeltaArmMaxX = getHighestPositionJump(3, ARM_MAX_X);
+		//int maxDeltaArmMinY = getHighestPositionJump(3, ARM_MIN_Y);
+		//int maxDeltaArmMaxY = getHighestPositionJump(3, ARM_MAX_Y);
 
 		int space = img.rows - (getLastPosition(1, MAX_Y) - getLastPosition(1, MIN_Y));
 
@@ -837,7 +913,9 @@ void searchGesture(cv::Mat frame) {
 			direction == LEFT &&
 			minY_armMinY_AvDelta != INT16_MIN && speedMinX != INT16_MIN && armMinXStop != INT16_MIN && space != INT16_MIN &&
 			minY_armMinY_AvDelta > (int)(20 * distanceFactor) && space < (int)(60 * distanceFactor) &&
-			(armMinXStop < (int)(5 * distanceFactor) && speedMinX > (int)(-150 * distanceFactor) && speedMinX < (int)(-50 * distanceFactor))
+			(armMinXStop < (int)(5 * distanceFactor) && speedMinX > (int)(-150 * distanceFactor) && speedMinX < (int)(-50 * distanceFactor)) &&
+			maxDeltaArmMinX < (int)(200 * distanceFactor) && maxDeltaArmMaxX < (int)(30 * distanceFactor) /*&&
+			maxDeltaArmMinY < (int)(30 * distanceFactor) && maxDeltaArmMaxY < (int)(30 * distanceFactor)*/
 		)
 		{
 			gesture = KAMEHAMEHA_LEFT;
@@ -847,7 +925,9 @@ void searchGesture(cv::Mat frame) {
 			direction == RIGHT &&
 			minY_armMinY_AvDelta != INT16_MIN && speedMaxX != INT16_MIN && armMaxXStop != INT16_MIN && space != INT16_MIN &&
 			minY_armMinY_AvDelta > (int)(20 * distanceFactor) && space < (int)(60 * distanceFactor) &&
-			(armMaxXStop > (int)(-5 * distanceFactor) && speedMaxX < (int)(150 * distanceFactor) && speedMaxX > (int)(50 * distanceFactor))
+			(armMaxXStop > (int)(-5 * distanceFactor) && speedMaxX < (int)(150 * distanceFactor) && speedMaxX > (int)(50 * distanceFactor)) &&
+			maxDeltaArmMinX < (int)(30 * distanceFactor) && maxDeltaArmMaxX < (int)(200 * distanceFactor) /*&&
+			maxDeltaArmMinY < (int)(30 * distanceFactor) && maxDeltaArmMaxY < (int)(30 * distanceFactor)*/
 		)
 		{
 			gesture = KAMEHAMEHA_RIGHT;
@@ -859,23 +939,26 @@ void searchGesture(cv::Mat frame) {
 		}
 	}
 
-	if (gesture == NO_GESTURE) {
+	if (gesture == NO_GESTURE && activateGame == false) {
 		int startHeight = getLastPosition(7, ARM_MAX_Y) - getLastPosition(7, ARM_MIN_Y);
 		int endHeight = armMaxY - armMinY;
 		int speedArmMinY = getPositionAverageDelta(7, ARM_MIN_Y);
 		int speedArmMaxY = getPositionAverageDelta(7, ARM_MAX_Y);
-		int space = img.rows - (getLastPosition(1, ARM_MAX_Y) - getLastPosition(1, ARM_MIN_Y));
+		int maxDeltaArmMaxY = getHighestPositionJump(7, ARM_MAX_Y);
+		int maxDeltaArmMinY = getHighestPositionJump(7, ARM_MIN_Y);
 		/**/
 		if
 		(
-			speedArmMinY != INT16_MIN && speedArmMaxY != INT16_MIN && space > INT16_MIN &&
+			speedArmMinY != INT16_MIN && speedArmMaxY != INT16_MIN && maxDeltaArmMaxY != INT16_MIN && maxDeltaArmMinY != INT16_MIN &&
 			speedArmMinY > (int)(-50 * distanceFactor) && speedArmMinY < (int)(-2 * distanceFactor) &&
 			speedArmMaxY > (int)(2 * distanceFactor) && speedArmMaxY < (int)(50 * distanceFactor) &&
 			abs(abs(speedArmMaxY) - abs(speedArmMinY)) < (int)(20 * distanceFactor) &&
 			startHeight > (int)(90 * distanceFactor) && startHeight < (int)(150 * distanceFactor) &&
-			endHeight > (int)(360 * distanceFactor)
+			endHeight > (int)(300 * distanceFactor) &&
+			maxDeltaArmMaxY < (int)(90 * distanceFactor) &&
+			maxDeltaArmMinY < (int)(90 * distanceFactor)/**/
 		)
-		{
+		{			
 			if (getLastPosition(7, DIRECTION) == LEFT) {
 				direction = LEFT;
 				gesture = ENERGY_BALL_LEFT;
@@ -915,6 +998,121 @@ void searchGesture(cv::Mat frame) {
 	positionsCount++;
 }
 
+/**********************************************************/
+
+/***************************GAME*******************************/
+cv::Mat game(cv::Mat outputFrame) {
+
+	stringstream text;
+	text << "Killed Monkeys: " << killedMonkeyCount;
+	cv::putText(outputFrame, text.str(), cv::Point(150, 30), CV_FONT_HERSHEY_COMPLEX, 1, cv::Scalar(0, 0, 255), 2);
+
+	cv::Point walkToP;
+	cv::Point walkFromP;
+	switch (walkPath) {
+		case 0:		walkToP		= cv::Point(50, 50);
+					walkFromP	= cv::Point(-200, 50);
+					break;
+		case 1:		walkToP		= cv::Point(50, 200);
+					walkFromP	= cv::Point(-200, 200);
+					break;
+		case 2:		walkToP		= cv::Point(50, 300);
+					walkFromP	= cv::Point(-200, 300);
+					break;
+		case 3:		walkToP		= cv::Point(440, 50);
+					walkFromP	= cv::Point(640, 50);
+					break;
+		case 4:		walkToP		= cv::Point(440, 200);
+					walkFromP	= cv::Point(640, 200);
+					break;
+		case 5:		walkToP		= cv::Point(440, 300);
+					walkFromP	= cv::Point(640, 300);
+					break;
+		default:		walkToP		= cv::Point(50, 50);
+					walkFromP	= cv::Point(-200, 50);
+	}
+	
+
+	if (isMonkeyDead) {
+		if (waitAfterMonkeyIsDeadCount == WAIT_AFTER_MONKEY_IS_DEAD) {
+			aniFrameNumber = 47;
+			killedMonkeyCount++;
+		}		
+		if (waitAfterMonkeyIsDeadCount != 0) {
+			waitAfterMonkeyIsDeadCount--;			
+			return outputFrame;
+		}
+		else {
+			if (gesture == KAMEHAMEHA_LEFT || gesture == KAMEHAMEHA_RIGHT) {
+				return outputFrame;
+			}
+			waitAfterMonkeyIsDeadCount = WAIT_AFTER_MONKEY_IS_DEAD;
+			monkeyAction = WALK;
+
+			walkPath = rand() % 7;
+			switch (walkPath) {
+				case 0:		monkeyP = cv::Point(-200, 50);
+							break;
+				case 1:		monkeyP = cv::Point(-200, 200);
+							break;
+				case 2:		monkeyP = cv::Point(-200, 300);
+							break;
+				case 3:		monkeyP = cv::Point(640, 50);
+							break;
+				case 4:		monkeyP = cv::Point(640, 200);
+							break;
+				case 5:		monkeyP = cv::Point(640, 300);
+							break;
+				default:		monkeyP = cv::Point(-200, 50);
+			}
+			isMonkeyDead = false;
+			return outputFrame;
+		}
+	}
+	else {
+		if (isMonkeyDirectionRight && gesture == KAMEHAMEHA_LEFT && aniFrameNumber > 5 && 
+			(aniOriginY < monkeyP.y + 75 + 50 && aniOriginY > monkeyP.y + 75 - 50)) {
+			monkeyAction = DIE;
+		}
+		else if (!isMonkeyDirectionRight && gesture == KAMEHAMEHA_RIGHT && aniFrameNumber > 5 && 
+			(aniOriginY < monkeyP.y + 75 + 50 && aniOriginY > monkeyP.y + 75 - 50)) {
+			monkeyAction = DIE;
+		}
+		else if (walkFromP.x < 0) {
+			isMonkeyDirectionRight = true;
+			if (monkeyP.x < walkToP.x) {
+				monkeyP.x = monkeyP.x + 3;
+				monkeyAction = WALK;
+			}
+			else if (monkeyP.x == walkToP.x) {
+				monkeyAction = STAND;
+			}
+		}
+		else if (walkFromP.x >= 0) {
+			isMonkeyDirectionRight = false;
+			if (monkeyP.x > walkToP.x) {
+				monkeyP.x = monkeyP.x - 3;
+				monkeyAction = WALK;
+			}
+			else if (monkeyP.x == walkToP.x) {
+				monkeyAction = STAND;
+			}
+		}
+	}
+
+	
+	cv::Mat affeIMG = getAniImgAffe(monkeyAction);
+	if (affeIMG.data == NULL) {
+		return outputFrame;
+	}
+	if (isMonkeyDirectionRight) {
+		cv::flip(affeIMG, affeIMG, 1);
+	}
+	
+	overlayImage(outputFrame, affeIMG, outputFrame, monkeyP);
+
+	return outputFrame;
+}
 /**********************************************************/
 
 
@@ -972,9 +1170,23 @@ int MonoLoop()
 			cout << "aniOriginX: " << aniOriginX << "          aniOriginY: " << aniOriginY << endl;
 			if (aniOriginX > -1 && aniOriginX < addImg.cols && aniOriginY > -1 && aniOriginY < addImg.rows) {
 				addImg = resizeAndPosAnimation(addImg, gestureScaleFactor, aniOriginX, aniOriginY);
-				cv::add(inputFrame, addImg, outputFrame);
+				cv::add(inputFrame, addImg, outputFrame);			
 			}
 		}
+
+		if (activateGame) {
+			outputFrame = game(outputFrame);
+		}
+
+		if (aniFrameNumber % 2 == 0) {
+			if (gesture == KAMEHAMEHA_LEFT || gesture == KAMEHAMEHA_RIGHT) {
+				cv::add(outputFrame, kamehamehaLightImg, outputFrame);
+			}
+			else if (gesture == ENERGY_BALL_LEFT || gesture == ENERGY_BALL_RIGHT) {
+				cv::add(outputFrame, energyballLightImg, outputFrame);
+			}
+		}
+
 
 		inputFrame.copyTo(bgImg);
 		/***************************end todo*****************************/
@@ -999,9 +1211,11 @@ int _tmain(int argc, _TCHAR* argv[])
 	//  CStereoLoop myLoop;
 	// myLoop.Run();
 
+	/*
 	if(!cascadeKamehamehaLeft.load(cascadeKamehamehaLeft_path)) {
 		printf("--(!)Error loading\n"); return -1; 
 	};
+	*/
 
 	return MonoLoop();
 }
