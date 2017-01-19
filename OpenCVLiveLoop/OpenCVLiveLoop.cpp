@@ -48,19 +48,13 @@ enum Directions {
 };
 Directions direction = NO_DIRECTION;
 
-//Zustände/Bedingungen, die erreicht/erfüllt werden müssen, um eine bestimmte Animation auszuführen
-enum Conditions {
-	NO_CONDITION,
-	KAMEHAMEHA_START,
-	KAMEHAMEHA_DETECTED_HAND_MOVEMENT,
-	KAMEHAMÈHA_CORRECT_HAND_MOVEMENT
-};
-const int ENTERED_STATES_MAX = 5;
-Conditions enteredStates[ENTERED_STATES_MAX];
-int conditionWaitCount = 0;
+
+/*
 string cascadeKamehamehaLeft_path = "../Cascade Classifier/Cascade_kamehameha_left_V2.xml";
 cv::CascadeClassifier cascadeKamehamehaLeft;
 vector<cv::Rect> cascadeKamehamehaRects;
+*/
+
 
 //Mögliche Gesten/Animationen
 enum Gestures {
@@ -79,7 +73,7 @@ float distanceFactor = 1;
 bool firstLoop = true;
 int aniFrameNumber = 0;
 
-const int WAIT_AFTER_ANI = 50;
+const int WAIT_AFTER_ANI = 20;
 int waitAfterAniCount = 0;
 
 int aniOriginX = (int)(MY_IMAGE_WIDTH / 2.0);
@@ -257,11 +251,6 @@ int getPositionAverageDeltaBetw2Pos(int returnBy, PositionVars posVar1, Position
 }
 /**********************************************************************************************************/
 
-void clearEnteredStates() {
-	for (int i = 0; i < ENTERED_STATES_MAX; i++) {
-		enteredStates[i] = NO_CONDITION;
-	}
-}
 
 
 
@@ -270,7 +259,7 @@ void clearEnteredStates() {
 cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, int originY) {
 	cv::Mat addImg;
 	blackImg.copyTo(addImg);
-	cout << "originX: " << originX << "          originY: " << originY << endl;
+	//cout << "originX: " << originX << "          originY: " << originY << endl;
 
 	//Animations-Bild auf passende Größe skalieren
 	int newAniImgWidth = (int)(aniImg.cols * resizeFactor);
@@ -298,8 +287,8 @@ cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, i
 	//Animations-Bild verschieben und clippen
 	int deltaX = originX - originXOffset;
 	int deltaY = originY - originYOffset;
-	cout << "deltaX: " << deltaX << "          deltaY: " << deltaY << endl;
-	cout << "aniImg-Width: " << aniImg.cols << "          aniImg-Height: " << aniImg.rows << endl;
+	//cout << "deltaX: " << deltaX << "          deltaY: " << deltaY << endl;
+	//cout << "aniImg-Width: " << aniImg.cols << "          aniImg-Height: " << aniImg.rows << endl;
 
 	int clippingX = 0;
 	int clippingY = 0;
@@ -344,16 +333,16 @@ cv::Mat resizeAndPosAnimation(cv::Mat aniImg, float resizeFactor, int originX, i
 		}
 	}
 
-	cout << "clippingX: " << clippingX << "          clippingY: " << clippingY << endl;
-	cout << "positionX: " << positionX << "          positionY: " << positionY << endl;
+	//cout << "clippingX: " << clippingX << "          clippingY: " << clippingY << endl;
+	//cout << "positionX: " << positionX << "          positionY: " << positionY << endl;
 
 	//Clippen
 	aniImg_ROI(cv::Rect(clippingX, clippingY, clippingW, clippingH)).copyTo(aniImg_ROI);
-	imshow("aniImgClipped", aniImg_ROI);
+	//imshow("aniImgClipped", aniImg_ROI);
 
 	//Animations-Bild an gewünschte Position setzen
 	aniImg_ROI.copyTo(addImg(cv::Rect(positionX, positionY, aniImg_ROI.cols, aniImg_ROI.rows)));
-	imshow("aniImg_2", addImg);
+	//imshow("aniImg_2", addImg);
 	return addImg;
 }
 
@@ -509,7 +498,7 @@ bool searchPositions(cv::Mat imgDiff) {
 	cv::Mat imgDiffSmall;
 	imgDiff.copyTo(imgDiffSmall);
 	cv::resize(imgDiffSmall, imgDiffSmall, cv::Size((int)(imgDiffSmall.cols * scaleFactor), (int)(imgDiffSmall.rows * scaleFactor)));
-	imshow("imgSmall", imgDiffSmall);
+	//imshow("imgSmall", imgDiffSmall);
 
 	minX = INT16_MAX;
 	minY = INT16_MAX;
@@ -591,7 +580,7 @@ bool searchPositions(cv::Mat imgDiff) {
 		}
 	}
 	
-	cout << "maxX" << maxX - (int)(areaWidth * scaleFactor) << endl;
+	//cout << "maxX" << maxX - (int)(areaWidth * scaleFactor) << endl;
 	int armMinX_r = minX;
 	int armMinY_r = INT16_MAX;
 	int armMaxX_r = maxX;
@@ -644,32 +633,6 @@ bool searchPositions(cv::Mat imgDiff) {
 		armMaxY = armMaxY_r;
 	}
 	
-
-	/*
-	int personMinX = INT16_MAX;
-	int personMinY = minY;
-	int personMaxX = maxX;
-	int personMaxY = maxX;
-	for (int y2 = minY; y2 < maxY; y2++) {
-		if (y2 == armMinY) {
-			y2 = armMaxY;
-			continue;
-		}
-		for (int x2 = minX; x2 < maxX; x2++) {
-			cv::Scalar pixel = imgDiffSmall.at<uchar>(y2, x2);
-			if (pixel.val[0] > 254) {
-
-				if (personMinX > x2) {
-					personMinX = x2;
-					break;
-				}
-
-			}
-		}
-	}
-	armMaxX = personMinX;
-	*/
-	
 	if (minX > -1 && minX < imgDiffSmall.cols &&
 		minY > -1 && minY < imgDiffSmall.rows &&
 		maxX > -1 && maxX < imgDiffSmall.cols &&
@@ -678,12 +641,7 @@ bool searchPositions(cv::Mat imgDiff) {
 		armMinX > -1 && armMinX < imgDiffSmall.cols &&
 		armMinY > -1 && armMinY < imgDiffSmall.rows &&
 		armMaxX > -1 && armMaxX < imgDiffSmall.cols &&
-		armMaxY > -1 && armMaxY < imgDiffSmall.rows /*&&
-		
-		personMinX > -1 && personMinX < imgDiffSmall.cols &&
-		personMinY > -1 && personMinY < imgDiffSmall.rows &&
-		personMaxX > -1 && personMaxX < imgDiffSmall.cols &&
-		personMaxY > -1 && personMaxY < imgDiffSmall.rows*/) {
+		armMaxY > -1 && armMaxY < imgDiffSmall.rows) {
 		//Bewegung erkannt
 
 		minX	= (int)(minX / scaleFactor);
@@ -701,14 +659,9 @@ bool searchPositions(cv::Mat imgDiff) {
 		armMaxX = (int)(armMaxX / scaleFactor);
 		armMaxY = (int)(armMaxY / scaleFactor);
 		
-		/*
-		personMinX = (int)(personMinX / scaleFactor);
-		personMinY = (int)(personMinY / scaleFactor);
-		personMaxX = (int)(personMaxX / scaleFactor);
-		personMaxY = (int)(personMaxY / scaleFactor);
-		*/
 
 		/****************************/
+		/*
 		cv::Mat imgGraphics;
 		currFrame.copyTo(imgGraphics);
 
@@ -725,6 +678,7 @@ bool searchPositions(cv::Mat imgDiff) {
 		path << "../Test-IMGs/imGraphics" << positionsCount << ".jpg";
 		cv::imwrite(path.str(), imgGraphics);
 		imshow("imgGraphics", imgGraphics);
+		*/
 		/****************************/
 		return true;
 	}
@@ -875,7 +829,7 @@ void searchGesture(cv::Mat frame) {
 	}
 	
 	
-	imshow("diffImg", imgDiff);
+	//imshow("diffImg", imgDiff);
 
 	if (waitAfterAniCount != 0) {
 		waitAfterAniCount--;
@@ -1137,7 +1091,7 @@ int MonoLoop()
 	cap.set(CV_CAP_PROP_FRAME_HEIGHT, MY_IMAGE_HEIGHT);
 
 	// display the frame size that OpenCV has picked in order to check 
-	cout << "cam Frame size: " << dWidth << " x " << dHeight << endl;
+	//cout << "cam Frame size: " << dWidth << " x " << dHeight << endl;
 	cv::namedWindow("cam", CV_WINDOW_AUTOSIZE);
 
 	cv::Mat inputFrame;
@@ -1167,7 +1121,7 @@ int MonoLoop()
 
 		if (gesture != NO_GESTURE) {
 			cv::Mat addImg = getAniImg(aniFrameNumber);
-			cout << "aniOriginX: " << aniOriginX << "          aniOriginY: " << aniOriginY << endl;
+			//cout << "aniOriginX: " << aniOriginX << "          aniOriginY: " << aniOriginY << endl;
 			if (aniOriginX > -1 && aniOriginX < addImg.cols && aniOriginY > -1 && aniOriginY < addImg.rows) {
 				addImg = resizeAndPosAnimation(addImg, gestureScaleFactor, aniOriginX, aniOriginY);
 				cv::add(inputFrame, addImg, outputFrame);			
@@ -1191,8 +1145,9 @@ int MonoLoop()
 		inputFrame.copyTo(bgImg);
 		/***************************end todo*****************************/
 
+		cv::resize(outputFrame, outputFrame, cv::Size(800, 600));
 		imshow("cam", outputFrame);
-		imshow("bgImg", bgImg);
+		//imshow("bgImg", bgImg);
 
 		if (cv::waitKey(MY_WAIT_IN_MS) == 27)
 		{
